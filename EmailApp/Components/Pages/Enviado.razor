@@ -1,0 +1,660 @@
+﻿@page "/enviados"
+@using CommunityToolkit.Maui.Storage
+@using EmailApp.UseCases.Services
+@using MailAppMAUI.General
+@using MailAppMAUI.Core
+@using MailAppMAUI.Controladores
+@using MailAppMAUI.Repositorios
+@using MailAppMAUI.UseCases
+@using MailAppMAUI.UseCases.Services
+@using MailAppMAUI.Repositorios
+@using MimeKit
+@inject GesCorreos _gesCorreos
+@inject RepositoryManager _repositoryManager
+@using Syncfusion.Blazor
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Data
+@using Syncfusion.Blazor.Navigations
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Buttons
+@using Syncfusion.Blazor.Notifications
+@using System.Text.RegularExpressions
+@using MailAppMAUI.Contexto;
+@using System
+@implements IDisposable
+
+<SfToast @ref="toastObj" Timeout="5000">
+    <ToastPosition X="Center" Y="Bottom"></ToastPosition>
+</SfToast>
+
+<!-- Contenedor principal -->
+<div class="page-container">
+
+    <!-- Contenedor del grid y la paginación -->
+    <div class="grid-pag-container">
+        <!-- Tabla -->
+        <div class="grid-card">
+            <SfGrid @ref="Grid" DataSource="@bandejaEnviados.CorreosPaged" AllowSelection="true" AllowSorting="true" SelectionSettings="@selectionSettings">
+                <GridEvents RowSelected="OnRowSelected" RowDeselected="OnRowDeselected" TValue="BandejaEnviadosVM.EnviadoVM"></GridEvents>
+                <GridColumns>
+                    <GridColumn Width="3%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            @{
+                                var enviadoVM = (BandejaEnviadosVM.EnviadoVM)correo;
+                            }
+                            <input type="checkbox"
+                                   @onclick:stopPropagation="true"
+                                   checked="@IsSelected(enviadoVM)"
+                                   @onchange="@(e => OnCheckboxChanged(enviadoVM, e))" />
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="NombreUsuario" HeaderText="Para" Width="10%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis" />
+                    <GridColumn Field="Asunto" HeaderText="Asunto" Width="10%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis" />
+                    <GridColumn Field="Cuerpo" HeaderText="Mensaje" Width="25%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis">
+                        <Template Context="cuerpo">
+                            @RemoveHtmlTags((cuerpo as BandejaEnviadosVM.EnviadoVM).CuerpoHTML)
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Fecha" Width="6%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            @{
+                                var enviadoVM = (BandejaEnviadosVM.EnviadoVM)correo;
+                                var fecha = enviadoVM.FechaEnviado;
+                                var hoy = DateTime.Today;
+
+                                string textoFecha = (fecha.Date == hoy)
+                                ? fecha.ToString("HH:mm")
+                                : fecha.ToString("dd/MM");
+                            }
+                            <span>@textoFecha</span>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Width="5%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            <div class="delete-button-container" style="@( (bandejaEnviados.SelectedCorreos.Contains(correo) && bandejaEnviados.SelectedCorreos.Count == 1)
+                            ? "visibility: visible;" : "visibility: hidden;") display: flex; justify-content: center; align-items: center;">
+                                <button class="btn custom-delete-btn" @onclick="EliminarCorreo">
+                                    <i class="bi bi-backspace-fill no-margin"></i>
+                                </button>
+                            </div>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
+        </div>
+
+    </div>
+
+    <!-- Panel de detalle del correo dentro de una tarjeta -->
+    @if (bandejaEnviados.SelectedCorreos.Count > 0)
+    {
+        <div class="detail-card @(bandejaEnviados.SelectedCorreos.Count > 1 ? "centered-card" : "")">
+            @if (bandejaEnviados.SelectedCorreos.Count == 1 && bandejaEnviados.SelectedCorreo != null)
+            {
+                <!-- Vista de la Respuesta / Mensaje a Enviar -->
+                <div class="correo-detalle">
+                    <div class="correo-detalle-contenido">
+                        <p></p>
+                        <span class="entrada-name">@bandejaEnviados.SelectedCorreo.Asunto</span>
+                        <p></p>
+
+                        <!-- Destinatario -->
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                            <div>
+                                <span class="salida-subtext">Para:</span>
+                                <span class="chips-container">
+                                    @foreach (var dest in bandejaEnviados.SelectedCorreo.Destinatarios)
+                                    {
+                                        <span class="chip">@dest</span>
+                                    }
+                                </span>
+                            </div>
+                            <div style="font-size: 12px; color: #777; margin-top: 5px;">
+                                @{
+                                    var fechaFormateada = bandejaEnviados.SelectedCorreo.FechaEnviado
+                                    .ToString("dddd, dd 'de' MMMM 'de' yyyy HH:mm", new System.Globalization.CultureInfo("es-ES"));
+                                    fechaFormateada = char.ToUpper(fechaFormateada[0]) + fechaFormateada[1..];
+                                }
+                                @fechaFormateada
+                            </div>
+                        </div>
+
+                        <p>@(new MarkupString(bandejaEnviados.SelectedCorreo.CuerpoHTML.Replace("\n", "<br>")))</p>
+                        @if (bandejaEnviados.SelectedCorreo.Adjuntos?.Any() == true)
+                        {
+                            <ul class="chipUpload-container">
+                                @foreach (var adjunto in bandejaEnviados.SelectedCorreo.Adjuntos)
+                                {
+                                    <li class="chipUpload">
+                                        <i class="@GetFileIcon(adjunto.Nombre) no-margin-icon"
+                                           style="@GetFileColorClass(adjunto.Nombre) margin-right:6px;"></i>
+                                        <a href="javascript:void(0)"
+                                           class="adjunto-name"
+                                           @onclick="() => DescargarAdjunto(adjunto)">
+                                            @adjunto.Nombre
+                                        </a>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <!-- TARJETA CENTRADA DE MULTI-SELECCIÓN -->
+                <div class="centered-content">
+                    <i class="bi bi-envelope-fill big-envelope-icon" style="margin-left: 15px !important;"></i>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; margin-top: 25px;">
+                        <button class="multiple-btn" @onclick="EliminarCorreo">
+                            <i class="bi bi-trash no-margin-icon"></i> Eliminar
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+</div>
+
+@code {
+    public static event System.Action OnUpdateView;
+
+    public SfGrid<BandejaEnviadosVM.EnviadoVM> Grid;
+    private int PageSize = 10;
+    private int CurrentPage = 1;
+    private string searchText = string.Empty; // Campo para la búsqueda
+
+    private bool initialSelectionDone = false;
+    private BandejaEnviadosVM bandejaEnviados;
+
+    private SfToast toastObj;
+
+    [CascadingParameter] public EventCallback<string> OnSearch { get; set; }
+
+    private Guid renderKey = Guid.NewGuid();
+
+    private bool DetalleVisible { get; set; } = false;
+
+    private Syncfusion.Blazor.Grids.GridSelectionSettings selectionSettings = new Syncfusion.Blazor.Grids.GridSelectionSettings
+        {
+            Type = Syncfusion.Blazor.Grids.SelectionType.Multiple,
+            Mode = Syncfusion.Blazor.Grids.SelectionMode.Row
+        };
+
+    private void HandleSearch(string query)
+    {
+        Console.WriteLine($"[Enviados] Recibido search: {query}");
+        searchText = query;  // Actualizamos la variable si es necesario
+        ApplyPagination();
+        InvokeAsync(StateHasChanged);
+    }
+
+
+    protected override void OnInitialized()
+    {
+        bandejaEnviados = new(_gesCorreos, _repositoryManager);
+
+        SearchService.OnSearch += HandleSearch;
+
+        RespuestaRepository.OnUpdateRespuesta += bandejaEnviados.UpdateModel;
+        // RespuestaRepository.OnUpdateRespuesta += UpdateView;
+        OnUpdateView += UpdateView;
+
+        UpdateView();
+
+        ApplyPagination();
+    }
+
+    public void Dispose()
+    {
+        SearchService.OnSearch -= HandleSearch;
+        RespuestaRepository.OnUpdateRespuesta += bandejaEnviados.UpdateModel;
+        // RespuestaRepository.OnUpdateRespuesta += UpdateView;
+        OnUpdateView -= UpdateView;
+    }
+
+    public void UpdateView()
+    {
+        if (Grid != null)
+        {
+            Grid?.Refresh();
+        }
+        ApplyPagination(); // si hace falta
+        InvokeAsync(StateHasChanged);
+    }
+
+    #region VIEWMODEL
+
+    /// <summary>
+    /// Clase ViewModel de la vista
+    /// </summary>
+    public class BandejaEnviadosVM : VModelBase
+    {
+        public static RepositoryManager repositoryManager;
+
+        int correosPerPage;
+        public BandejaEnviadosVM(IAction gesCorreos, RepositoryManager repository) : base(gesCorreos)
+        {
+            repositoryManager = repository;
+            UpdateModel(OpResul.Range);
+        }
+
+        public List<EnviadoVM> Correos { get; set; } = new();        //Lista de todos los correos
+        public List<EnviadoVM> CorreosPaged { get; set; } = new();   //Lista de correos paginados (los que se mostrarán)
+        public EnviadoVM? SelectedCorreo { get; set; }               //Correo seleccinado en el Grid
+        public List<EnviadoVM> SelectedCorreos { get; set; } = new();
+
+        /// <summary>
+        /// Clase para representar los correos
+        /// </summary>
+        public class EnviadoVM
+        {
+            public string NombreUsuario { get; set; } = string.Empty;
+            public List<string> Destinatarios { get; set; } = new List<string>();
+            public string Remitente { get; set; } = string.Empty;
+            public string Asunto { get; set; } = string.Empty;
+            public string Cuerpo { get; set; } = string.Empty;
+            public string CuerpoHTML { get; set; } = string.Empty;
+            public bool Enviado { get; set; }
+            public bool EsEliminado { get; set; }
+            public DateTime FechaEnviado { get; set; }
+            public List<Adjunto> Adjuntos { get; set; }
+            public int RespuestaId { get; set; }
+            public bool Seleccionado { get; set; }
+
+
+            /// <summary>
+            /// Conversor explicito de CorreoCore a EnviadoVM
+            /// </summary>
+            /// <param name="respuesta">Correo a convertir</param>
+            public static explicit operator EnviadoVM(Respuesta respuesta)
+            {
+                var correoId = respuesta.CorreoId ?? -1;
+                var correoEnviado = repositoryManager.CorreoRepository.GetById(correoId);
+
+                return new EnviadoVM
+                    {
+                        NombreUsuario = respuesta.NombreDestinatario ?? "Desconocido",
+                        Destinatarios = respuesta.Destinatarios,
+                        Remitente = respuesta.Remitente ?? string.Empty,
+                        Asunto = respuesta?.Asunto ?? string.Empty,
+                        Cuerpo = respuesta?.Cuerpo ?? string.Empty,
+                        CuerpoHTML = respuesta?.CuerpoHTML ?? string.Empty,
+                        FechaEnviado = respuesta.FechaEnviado,
+                        Adjuntos = respuesta.Adjuntos,
+                        Enviado = respuesta.Enviado,
+                        EsEliminado = respuesta.EsEliminado,
+                        RespuestaId = respuesta.RespuestaId,
+                    };
+            }
+            public override bool Equals(object obj)
+            {
+                if (obj is EnviadoVM other)
+                {
+                    return this.RespuestaId == other.RespuestaId;
+                }
+                return false;
+            }
+
+            public override int GetHashCode()
+            {
+                return RespuestaId.GetHashCode();
+            }
+
+        }
+
+        /// <summary>
+        /// Añade los correos del repositorio a la lista de correos y a la lista de correos por pagina
+        /// </summary>
+        /// <param name="dataResul"></param>
+
+        public override void UpdateModel(OpResul dataResul)
+        {
+            var emails = ((List<Respuesta>)GetData("Correo_GetRespuestas", correosPerPage))
+            .Where(r => r.Enviado == true && r.EsEliminado == false)
+            .OrderByDescending(c => c.FechaEnviado) // Ordena de más nuevo a más antiguo
+            .ToList();
+
+            Correos.Clear();
+            CorreosPaged.Clear();
+
+            var contactos = ((List<Contacto>)GetData("Correo_GetContactos"))
+                .ToList();
+
+            foreach (var email in emails)
+            {
+                EnviadoVM emailVM = (EnviadoVM)email;
+
+                if (emailVM.Destinatarios.Count > 1)
+                {
+                    emailVM.NombreUsuario = emailVM.Destinatarios.Count + " Destinatarios";
+                }
+                else
+                {
+                    //emailVM.NombreUsuario = contactos.Where(c => c.Email == emailVM.Destinatarios[0]).FirstOrDefault().Nombre.ToString();
+                    Contacto contacto = contactos.Where(c => c.Email == email.Remitente).FirstOrDefault();
+                    if (contacto != null)
+                    {
+                        emailVM.NombreUsuario = contacto.Nombre.ToString();
+                    }
+                }
+
+                Correos.Add(emailVM);
+
+                if (!CorreosPaged.Contains(emailVM))
+                {
+                    CorreosPaged.Add(emailVM);
+                }
+            }
+
+            OnUpdateView?.Invoke();
+        }
+    }
+
+    #endregion
+
+    #region METODOS DE LA CLASE
+
+    /// <summary>
+    /// Cambia la pagina de paginacion
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnPageChanged(Syncfusion.Blazor.Navigations.PageChangedEventArgs args)
+    {
+        CurrentPage = args.CurrentPage;
+        ApplyPagination();
+    }
+
+    /// <summary>
+    /// Metodo que aplica la busqueda y la paginacion
+    /// </summary>
+    private void ApplyPagination(bool seleccionarPrimero = true)
+    {
+        int startIndex = (CurrentPage - 1) * PageSize;
+        var filteredCorreos = string.IsNullOrEmpty(searchText)
+            ? bandejaEnviados.Correos
+                .Where(c => c.Enviado && !c.EsEliminado)
+                .OrderByDescending(c => c.FechaEnviado)
+                .ToList()
+            : bandejaEnviados.Correos
+                .Where(c =>
+                    c.Enviado &&
+                    !c.EsEliminado &&
+                    (
+                        c.Asunto.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                        c.Cuerpo.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+                    ))
+                .OrderByDescending(c => c.FechaEnviado)
+                .ToList();
+
+        bandejaEnviados.CorreosPaged = filteredCorreos.Skip(startIndex)
+        // .Take(PageSize)
+        .ToList();
+    }
+
+
+    private void ToggleSeleccion(BandejaEnviadosVM.EnviadoVM correo, bool? forzarValor = null)
+    {
+        bool nuevoEstado = forzarValor ?? !correo.Seleccionado;
+        correo.Seleccionado = nuevoEstado;
+
+        if (nuevoEstado)
+        {
+            if (!bandejaEnviados.SelectedCorreos.Contains(correo))
+                bandejaEnviados.SelectedCorreos.Add(correo);
+        }
+        else
+        {
+            bandejaEnviados.SelectedCorreos.Remove(correo);
+        }
+
+        bandejaEnviados.SelectedCorreo = (bandejaEnviados.SelectedCorreos.Count == 1)
+                                          ? bandejaEnviados.SelectedCorreos.First()
+                                          : null;
+
+        DetalleVisible = bandejaEnviados.SelectedCorreos.Count > 0;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se selecciona una fila
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowSelected(RowSelectEventArgs<BandejaEnviadosVM.EnviadoVM> args)
+    {
+        if (!args.IsCtrlPressed && !args.IsShiftPressed)
+        {
+            foreach (var c in bandejaEnviados.SelectedCorreos)
+                c.Seleccionado = false;
+
+            bandejaEnviados.SelectedCorreos.Clear();
+
+            ToggleSeleccion(args.Data, true); // Selecciona el nuevo
+
+            return;
+        }
+
+        if (args.IsCtrlPressed)
+        {
+            ToggleSeleccion(args.Data); // alterna
+        }
+        else if (args.IsShiftPressed && bandejaEnviados.SelectedCorreos.Any())
+        {
+            var allRows = bandejaEnviados.CorreosPaged.ToList();
+            var lastSelected = bandejaEnviados.SelectedCorreos.Last();
+            int start = allRows.IndexOf(lastSelected);
+            int end = allRows.IndexOf(args.Data);
+            if (start > end) (start, end) = (end, start);
+            for (int i = start; i <= end; i++)
+            {
+                ToggleSeleccion(allRows[i], true);
+            }
+        }
+        else
+        {
+            // Selección única
+            foreach (var corr in bandejaEnviados.SelectedCorreos)
+            {
+                corr.Seleccionado = false;
+            }
+            bandejaEnviados.SelectedCorreos.Clear();
+
+            ToggleSeleccion(args.Data, true);
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se cambia el estado del checkbox
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="e"></param>
+    private void OnCheckboxChanged(BandejaEnviadosVM.EnviadoVM correo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        bool isChecked = Convert.ToBoolean(e.Value);
+        ToggleSeleccion(correo, isChecked);
+    }
+
+    /// <summary>
+    /// Devuelve true si el correo está seleccionado
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <returns></returns>
+    private bool IsSelected(BandejaEnviadosVM.EnviadoVM correo)
+    {
+        return correo.Seleccionado;
+    }
+
+    /// <summary>
+    /// Se llama cuando se deslecciona una row
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowDeselected(RowDeselectEventArgs<BandejaEnviadosVM.EnviadoVM> args)
+    {
+        // Asegura que la deselección se refleja en todos lados (modelo y UI)
+        ToggleSeleccion(args.Data, false);
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Llama al metodo de busqueda al pulsar la tecla Enter
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnKeyUpHandler(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            ApplyPagination();
+        }
+    }
+
+    private string RemoveHtmlTags(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+
+        // Decodifica primero las entidades HTML
+        string decoded = System.Net.WebUtility.HtmlDecode(input);
+
+        // Elimina etiquetas HTML con Regex
+        var cleaned = Regex.Replace(decoded, "<.*?>", string.Empty);
+        return cleaned.Trim();
+    }
+
+    private async Task ShowToast(string text)
+    {
+        await toastObj.ShowAsync(new ToastModel
+            {
+                Content = text,
+                CssClass = "custom-toast",
+                Timeout = 3000
+            });
+    }
+
+    /// <summary>
+    /// Elimina un correo selecionado
+    /// </summary>
+    /// <param name="correo"></param>
+    // Dentro de tu @code { … }
+
+    private async Task EliminarCorreo()
+    {
+        try
+        {
+            //Hay mas de un correo selecionado
+            if (bandejaEnviados.SelectedCorreos.Count > 1)
+            {
+                // Creamos una copia de la lista antes de modificarla
+                var borradoresAEliminar = bandejaEnviados.SelectedCorreos.ToList();
+
+                foreach (BandejaEnviadosVM.EnviadoVM respuesta in borradoresAEliminar)
+                {
+                    bandejaEnviados.Action("Respuesta_EliminarRespuesta", respuesta.RespuestaId, [null]);
+                }
+
+                await ShowToast("¡Correos Borrados!");
+                bandejaEnviados.SelectedCorreos.Clear();
+            }
+            else
+            {
+                if (bandejaEnviados.SelectedCorreo != null)
+                {
+                    bandejaEnviados.Action("Respuesta_EliminarRespuesta", bandejaEnviados.SelectedCorreo.RespuestaId, [null]);
+
+                    bandejaEnviados.SelectedCorreo = null;
+
+                    await ShowToast("¡Correo Borrado!");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+
+        }
+    }
+
+    #endregion
+
+    #region ADJUNTOS
+
+    /// Metodo que elimina un adjunto de la lista de adjuntos
+    /// </summary>
+    /// <param name="adjunto"></param>
+    private void DeleteAttachment(Adjunto adjunto)
+    {
+        // Remueve el adjunto de la lista (o llama a tu lógica de eliminación)
+        bandejaEnviados.SelectedCorreo.Adjuntos.Remove(adjunto);
+
+        StateHasChanged();
+    }
+
+    private async Task DescargarAdjunto(Adjunto adjunto)
+    {
+        try
+        {
+            using var stream = File.OpenRead(adjunto.Ruta);
+
+            // Usamos la implementación por defecto, sin inyección
+            var result = await FileSaver.Default.SaveAsync(
+                adjunto.Nombre,  // nombre sugerido
+                stream,          // contenido
+                cancellationToken: CancellationToken.None
+            );
+
+            if (result.IsSuccessful)
+                await ShowToast($"¡Archivo guardado!");
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al guardar: {ex.Message}");
+        }
+    }
+
+    private string GetFileIcon(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "bi bi-filetype-pdf",      // PDF
+            ".doc" => "bi bi-filetype-doc",      // Word
+            ".docx" => "bi bi-filetype-doc",      // Word
+            ".xls" => "bi bi-filetype-xls",      // Excel
+            ".xlsx" => "bi bi-filetype-xls",      // Excel
+            ".ppt" => "bi bi-filetype-ppt",      // PowerPoint
+            ".pptx" => "bi bi-filetype-ppt",      // PowerPoint
+            ".zip" => "bi bi-file-earmark-zip",  // ZIP
+            ".jpg" => "bi bi-filetype-jpg",      // JPG
+            ".jpeg" => "bi bi-filetype-jpg",      // JPG
+            ".png" => "bi bi-filetype-png",      // PNG
+            ".gif" => "bi bi-filetype-gif",      // GIF
+            _ => "bi bi-file-earmark"       // genérico
+        };
+    }
+
+    private string GetFileColorClass(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "color:#bf4040;",    // rojo
+            ".doc" => "color:#4083bf;",    // azul
+            ".docx" => "color:#4054bf;",    // azul oscuro
+            ".xls" => "color:#5eae3e;",    // verde
+            ".xlsx" => "color:#3eae48;",    // verde oscuro
+            ".ppt" => "color:#c77e30;",    // naranja
+            ".pptx" => "color:#af712e;",    // naranja oscuro
+            ".zip" => "color:#6e4790;",    // gris
+            ".jpg" => "color:#3a8dac;",    // turquesa
+            ".jpeg" => "color:#3a8dac;",    // turquesa
+            ".png" => "color:#3a8dac;",    // turquesa
+            ".gif" => "color:#3aac61;",    // verde claro
+            _ => "color:#ac9f3a;"     // amarillo
+        };
+    }
+
+
+    #endregion
+}
+

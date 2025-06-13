@@ -1,0 +1,1123 @@
+﻿@page "/salida"
+
+@using MailAppMAUI
+@using MailAppMAUI.General
+@using MailAppMAUI.Core
+@using MailAppMAUI.Controladores
+@using MailAppMAUI.Repositorios
+@using MailAppMAUI.Helpers
+@using MailAppMAUI.UseCases
+@using MailAppMAUI.UseCases.Services
+@using EmailApp.UseCases.Services
+
+@using MimeKit
+
+@using Microsoft.AspNetCore.Components.Forms;
+@using Microsoft.Maui.ApplicationModel
+@using Microsoft.Maui.Storage
+
+@using CommunityToolkit.Maui.Storage
+
+@using Syncfusion.Blazor
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Data
+@using Syncfusion.Blazor.Navigations
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Buttons
+@using Syncfusion.Blazor.Notifications
+@using Syncfusion.Blazor.RichTextEditor
+@using Syncfusion.Blazor.DropDowns
+
+@using System
+@using System.IO;
+@using System.Text.RegularExpressions
+@using System.Collections.ObjectModel
+@using System.Net.Http;
+@using System.Net.Http.Headers;
+@using System.Text.Json
+@using Logger = Ifs.Comun.Logger;
+
+@inject GesCorreos _gesCorreos
+@inject NavigationManager Nav
+
+@implements IDisposable
+
+<SfToast @ref="toastObj" Timeout="5000">
+    <ToastPosition X="Center" Y="Bottom"></ToastPosition>
+</SfToast>
+
+<!-- Contenedor principal -->
+<div class="page-container">
+
+    <!-- Contenedor del grid y la paginación -->
+    <div class="grid-pag-container">
+        <!-- Tabla -->
+        <div class="grid-card">
+            <SfGrid @ref="Grid" DataSource="@bandejaSalida.CorreosSalidaPaged" EnableAdaptiveUI="true" AllowSelection="@(!editando)" AllowSorting="true" SelectionSettings="@selectionSettings">
+                <GridEvents RowSelected="OnRowSelected" RowDeselected="OnRowDeselected" TValue="BandejaSalidaVM.RespuestaVM"></GridEvents>
+                <GridColumns>
+                    <GridColumn Width="3%" TextAlign="TextAlign.Center">
+                        <Template Context="salida">
+                            @{
+                                var salidaVM = (BandejaSalidaVM.RespuestaVM)salida;
+                            }
+                            <input type="checkbox"
+                                   @onclick:stopPropagation="true"
+                                   checked="@IsSelected(salidaVM)"
+                                   disabled="@editando"
+                                   @onchange="@(e => OnCheckboxChanged(salidaVM, e))" />
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="NombreUsuario" HeaderText="Para" Width="10%" TextAlign="TextAlign.Left" />
+                    <GridColumn Field="Asunto" HeaderText="Asunto" Width="10%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis" />
+                    <GridColumn Field="CuerpoHTML" HeaderText="Mensaje" Width="30%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis">
+                        <Template Context="cuerpo">
+                            @RemoveHtmlTags((cuerpo as BandejaSalidaVM.RespuestaVM).CuerpoHTML)
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Fecha" Width="6%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            @{
+                                var respuestaVM = (BandejaSalidaVM.RespuestaVM)correo;
+                                var fecha = respuestaVM.Fecha;
+                                var hoy = DateTime.Today;
+
+                                string textoFecha = (fecha.Date == hoy)
+                                ? fecha.ToString("HH:mm")
+                                : fecha.ToString("dd/MM");
+                            }
+                            <span>@textoFecha</span>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
+        </div>
+    </div>
+
+    <!-- Panel de detalle del correo -->
+    @if (bandejaSalida.SelectedRespuestas.Count > 0)
+    {
+        <div class="detail-card @(bandejaSalida.SelectedRespuestas.Count > 1 ? "centered-card" : "")">
+            @if (bandejaSalida.SelectedRespuestas.Count == 1 && bandejaSalida.SelectedRespuesta != null)
+            {
+                @if (!showOriginal)
+                {
+                    <!-- Vista de la Respuesta / Mensaje a Enviar -->
+                    <div class="correo-detalle">
+
+                        <!-- Zona de Botones -->
+                        <div class="correo-detalle-botones">
+                            @if (editando)
+                            {
+                                <SfButton OnClick="OnGuardarClick" CssClass="mail-btn">Guardar</SfButton>
+                                <SfButton OnClick="OnCancelarEdicion" CssClass="mail-btn">Cancelar</SfButton>
+                            }
+                            else
+                            {
+                                <SfButton OnClick="OnEnviarClick" CssClass="enviar-btn">Enviar</SfButton>
+
+                                <SfButton OnClick="ToggleView" CssClass="mail-btn">
+                                    @(showOriginal ? "Respuesta" : "Original")
+                                </SfButton>
+
+                                <SfButton OnClick="OnEditarClick" CssClass="mail-btn">Editar</SfButton>
+
+                                <SfButton OnClick="OnRegenerarClick" CssClass="mail-btn">Regenerar</SfButton>
+                            }
+                        </div>
+                        <p></p>
+                        <!-- Zona de Contenido -->
+                        <div class="correo-detalle-contenido">
+                            <!-- Asunto -->
+                            @if (editando)
+                            {
+                                <div class="field-row">
+                                    <span class="salida-name" style="margin-right:10px;">Asunto:</span>
+                                    <div class="asunto-edit">
+                                        <SfTextBox @bind-Value="editedAsunto" Placeholder="Editar asunto" Style="display:inline-block" />
+                                    </div>
+                                    <p></p>
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="salida-name">Respuesta: @bandejaSalida.SelectedRespuesta.Asunto</span>
+                                <p></p>
+                            }
+
+                            <!-- Destinatario -->
+                            @if (editando)
+                            {
+                                <div class="destinatarios-edit">
+                                    <div class="field-row">
+                                        <span class="salida-subtext" style="margin-right:10px;">Destinatario:</span>
+                                        <div class="asunto-edit">
+                                            <SfTextBox @bind-Value="nuevoDestinatario" Placeholder="Escribe un correo y presiona Enter" Style="display:inline-block" @onkeyup="@(async (e) => await OnKeyDownDestinatario(e))" />
+                                        </div>
+                                    </div>
+
+                                    <!-- Mostrar los emails como chips -->
+                                    <div class="chips-container">
+                                        @foreach (var email in editedDestinatariosList)
+                                        {
+                                            <span class="chip">
+                                                @email
+                                                <button type="button" class="btn custom-delete-btn" @onclick="() => QuitarDestinatario(email)">
+                                                    <i class="bi bi-backspace-fill no-margin"></i>
+                                                </button>
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                                    <div>
+                                        <span class="salida-subtext">Destinatario:</span>
+                                        <span class="chips-container">
+                                            @foreach (var dest in bandejaSalida.SelectedRespuesta.Destinatarios)
+                                            {
+                                                <span class="chip">@dest</span>
+                                            }
+                                        </span>
+                                    </div>
+                                    <div style="font-size: 12px; color: #777; margin-top: 5px;">
+                                        @{
+                                            var fechaFormateada = bandejaSalida.SelectedRespuesta.Fecha
+                                            .ToString("dddd, dd 'de' MMMM 'de' yyyy HH:mm", new System.Globalization.CultureInfo("es-ES"));
+                                            fechaFormateada = char.ToUpper(fechaFormateada[0]) + fechaFormateada[1..];
+                                        }
+                                        @fechaFormateada
+                                    </div>
+                                </div>
+                            }
+
+                            <p></p>
+
+                            <!-- Cuerpo del correo -->
+                            @if (editando)
+                            {
+                                <SfRichTextEditor @ref="editedText" Height="300px">
+                                    <p>
+                                        @(new MarkupString((bandejaSalida.SelectedRespuesta.CuerpoHTML ?? string.Empty)))
+                                    </p>
+                                </SfRichTextEditor>
+
+                                <!-- Adjuntos -->
+                                <button class="newUpload-btn" @onclick="PickFiles">Subir Archivos</button>
+                                <ul class="chipUpload-container">
+                                    @foreach (var name in uploadedFilePaths)
+                                    {
+                                        <li class="chipUpload">
+                                            <i class="@GetFileIcon(name) no-margin-icon" style="@GetFileColorClass(name) margin-right:6px;"></i>
+                                            @name
+                                            <button class="btn custom-delete-btn" @onclick="() => RemoveFile(name)">
+                                                <i class="bi bi-backspace-fill"></i>
+                                            </button>
+                                        </li>
+                                    }
+                                </ul>
+
+                                <p></p>
+                            }
+                            else
+                            {
+                                <div class="correo-detalle-cuerpo">
+                                    <p>
+                                        @(new MarkupString((bandejaSalida.SelectedRespuesta.CuerpoHTML ?? string.Empty)))
+                                    </p>
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Adjuntos como chips -->
+                        @if (bandejaSalida.SelectedRespuesta.Adjuntos != null && bandejaSalida.SelectedRespuesta.Adjuntos.Any())
+                        {
+                            <ul class="chipUpload-container">
+                                @foreach (var adjunto in bandejaSalida.SelectedRespuesta.Adjuntos)
+                                {
+                                    <li class="chipUpload">
+                                        <i class="@GetFileIcon(adjunto.Nombre) no-margin-icon"
+                                           style="@GetFileColorClass(adjunto.Nombre) margin-right:6px;"></i>
+                                        <a href="javascript:void(0)"
+                                           class="adjunto-name"
+                                           @onclick="() => DescargarAdjunto(adjunto)">
+                                            @adjunto.Nombre
+                                        </a>                                        <button type="button" class="btn custom-delete-btn"
+                                                                                            @onclick="() => DeleteAttachment(adjunto)">
+                                            <i class="bi bi-backspace-fill"></i>
+                                        </button>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
+                    </div>
+                }
+                else
+                {
+                    <!-- Vista del Correo Original -->
+                    @if (bandejaSalida.SelectedRespuesta.Correo != null)
+                    {
+                        <!-- Botón para alternar entre vistas -->
+                        <SfButton OnClick="ToggleView" CssClass="mail-btn">
+                            @(showOriginal ? "Respuesta" : "Original")
+                        </SfButton>
+
+                        <p></p>
+
+                        <div class="correo-detalle">
+                            <span class="salidaOG-name">Original: @bandejaSalida.SelectedRespuesta.Correo.Asunto</span>
+                            <p></p>
+                            <p><span class="salidaOG-subtext">Remitente:</span> @bandejaSalida.SelectedRespuesta.Remitente</p>
+                            <div class="correo-detalle-cuerpo">
+                                <p>
+                                    @if (!string.IsNullOrEmpty(bandejaSalida.SelectedRespuesta.Correo.CuerpoHTML))
+                                    {
+                                        @(new MarkupString(bandejaSalida.SelectedRespuesta.Correo.CuerpoHTML))
+                                    }
+                                    else
+                                    {
+                                        @(new MarkupString((bandejaSalida.SelectedRespuesta.Correo.Cuerpo ?? string.Empty)
+                                            .Replace("\n", "<br>")))
+                                    }
+                                </p>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <p style="margin-top:20px; color:red;">No se encontró el correo original.</p>
+                    }
+                }
+
+                @if (!editando)
+                {
+                    <!-- Cuadro de texto para petición a la IA -->
+                    <div class="ia-request-container">
+                        <SfTextBox @bind-Value="iaRequest" Placeholder="Escribe una petición para la IA" Multiline="true" Rows="5" />
+                    </div>
+                }
+            }
+            else
+            {
+                <!-- TARJETA CENTRADA DE MULTI-SELECCIÓN -->
+                <div class="centered-content">
+                    <i class="bi bi-envelope-fill big-envelope-icon" style="margin-left: 15px !important;"></i>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; margin-top: 25px;">
+                        <button class="multiple-btn" @onclick="OnEnviarClick">
+                            <i class="bi bi-send no-margin-icon"></i> Enviar
+                        </button>
+                        <button class="multiple-btn" @onclick="OnRegenerarClick">
+                            <i class="bi bi-arrow-repeat no-margin-icon"></i> Regenerar
+                        </button>
+                    </div>
+                    <div class="ia-request-container" style="margin-top: 20px; width: 100%;">
+                        <SfTextBox @bind-Value="iaRequestMultiple"
+                                   Placeholder="Escribe una petición para la IA para todas las respuestas seleccionadas"
+                                   Multiline="true" Rows="5" FloatLabelType="FloatLabelType.Auto" />
+                    </div>
+
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+
+    #region COMPONENTES DE LA VISTA
+    public static event System.Action OnUpdateView;
+
+    private SfGrid<BandejaSalidaVM.RespuestaVM> Grid;
+    private int PageSize = 20;
+    private int CurrentPage = 1;
+    private string searchText = string.Empty; // Campo para la búsqueda
+
+    private BandejaSalidaVM bandejaSalida;
+    private SfRichTextEditor editedText = new();
+    private SfRichTextEditor editedDest = new();
+
+    private bool initialSelectionDone = false;
+
+    private List<string> uploadedFilePaths = new();
+
+    private bool editando = false;
+    private string originalCuerpo;
+    private string textoEditor = string.Empty;
+
+    private string editedDestinatarios = string.Empty;
+    private string editedAsunto = string.Empty;
+
+    private bool showOriginal = false;
+
+    private string iaRequest = string.Empty;
+    private string iaRequestMultiple = string.Empty;
+
+    private string nuevoDestinatario = string.Empty;
+    private List<string> editedDestinatariosList = new List<string>();
+
+    public static List<Contacto> misContactos = new List<Contacto>();
+
+    private SfToast toastObj;
+
+    [CascadingParameter] public EventCallback<string> OnSearch { get; set; }
+    [Inject] SampleDataService sampleDataService { get; set; }
+
+    private Syncfusion.Blazor.Grids.GridSelectionSettings selectionSettings = new Syncfusion.Blazor.Grids.GridSelectionSettings
+        {
+            Type = Syncfusion.Blazor.Grids.SelectionType.Multiple,
+            Mode = Syncfusion.Blazor.Grids.SelectionMode.Row
+        };
+
+    private void HandleSearch(string query)
+    {
+        Console.WriteLine($"[Salida] Recibido search: {query}");
+        searchText = query;  // Actualizamos la variable si es necesario
+        ApplyPagination();
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnInitialized()
+    {
+        bandejaSalida ??= new(_gesCorreos);
+
+        SearchService.OnSearch += HandleSearch;
+
+        RespuestaRepository.OnUpdateRespuesta += bandejaSalida.UpdateModel;
+        // RespuestaRepository.OnUpdateRespuesta += UpdateView;
+        OnUpdateView += UpdateView;
+
+        UpdateView();
+
+        ApplyPagination();
+    }
+
+    public void Dispose()
+    {
+        SearchService.OnSearch -= HandleSearch;
+        RespuestaRepository.OnUpdateRespuesta -= bandejaSalida.UpdateModel;
+        // RespuestaRepository.OnUpdateRespuesta -= UpdateView;
+        OnUpdateView -= UpdateView;
+    }
+
+    public void UpdateView()
+    {
+        if (Grid != null)
+        {
+            Grid.Refresh();
+        }
+        ApplyPagination(); // si hace falta
+        InvokeAsync(StateHasChanged);
+    }
+
+    #endregion
+
+    #region VIEWMODEL
+
+    /// <summary>
+    /// Clase ViewModel de la vista
+    /// </summary>
+    public class BandejaSalidaVM : VModelBase
+    {
+        public BandejaSalidaVM(IAction gesCorreos) : base(gesCorreos)
+        {
+            UpdateModel(OpResul.Range);
+        }
+
+        public ObservableCollection<RespuestaVM> CorreosSalida { get; set; } = new();
+        public List<RespuestaVM> CorreosSalidaPaged { get; set; } = new();
+        public RespuestaVM? SelectedRespuesta { get; set; }
+        public List<RespuestaVM> SelectedRespuestas { get; set; } = new();
+
+        /// <summary>
+        /// Clase para representar los Correos
+        /// </summary>
+        public class CorreoVM
+        {
+            public string Remitente { get; set; } = string.Empty;
+            public string Asunto { get; set; } = string.Empty;
+            public string Cuerpo { get; set; } = string.Empty;
+            public string CuerpoHTML { get; set; } = string.Empty;
+            public DateTime Fecha { get; set; }
+            public bool Eliminado { get; set; }
+
+            /// <summary>
+            /// Conversor explicito de CorreoCore a CorreoVM
+            /// </summary>
+            /// <param name="correo">Correo a convertir</param>
+            public static explicit operator CorreoVM(Correo correo)
+            {
+                return new CorreoVM
+                    {
+                        Remitente = correo.Remitente,
+                        Asunto = correo.Asunto ?? string.Empty,
+                        Cuerpo = correo.Cuerpo ?? string.Empty,
+                        CuerpoHTML = correo.CuerpoHTML ?? string.Empty,
+                        Fecha = correo.FechaRecibido,
+                        Eliminado = correo.Eliminado,
+                    };
+            }
+        }
+
+        /// <summary>
+        /// Clase para representar las Respuestas
+        /// </summary>
+        public class RespuestaVM
+        {
+            public int RespuestaId { get; set; }
+            public string NombreUsuario { get; set; } = string.Empty;
+            public string Remitente { get; set; } = string.Empty;
+            public List<string> Destinatarios { get; set; } = new List<string>();
+            public int CorreoId { get; set; }
+            public CorreoVM Correo { get; set; }
+            public string Asunto { get; set; } = string.Empty;
+            public string Cuerpo { get; set; } = string.Empty;
+            public string CuerpoHTML { get; set; } = string.Empty;
+            public bool EsIA { get; set; }
+            public DateTime Fecha { get; set; }
+            public List<Adjunto> Adjuntos { get; set; }
+            public bool Seleccionado { get; set; }
+            public bool EsEliminado { get; set; }
+            public bool Enviado { get; set; }
+
+            /// <summary>
+            /// Conversor explicito de RespuestaCore a RespuestaVM
+            /// </summary>
+            /// <param name="respuesta">respuesta a convertir</param>
+            public static explicit operator RespuestaVM(Respuesta respuesta)
+            {
+                return new RespuestaVM
+                    {
+                        //Comprueba si Correo y CorreoID es null para acceder a las propiedades
+                        RespuestaId = respuesta.RespuestaId,
+                        NombreUsuario = respuesta.NombreDestinatario,
+                        CorreoId = respuesta.CorreoId ?? -1,
+                        Correo = null,
+                        Remitente = respuesta.Remitente,
+                        Destinatarios = respuesta.Destinatarios,
+                        Asunto = respuesta.Asunto ?? string.Empty,
+                        Cuerpo = respuesta.Cuerpo ?? string.Empty,
+                        CuerpoHTML = respuesta.CuerpoHTML ?? string.Empty,
+                        Fecha = respuesta.FechaProcesado,
+                        Adjuntos = respuesta.Adjuntos,
+                        EsIA = respuesta.EsIA,
+                        Enviado = respuesta.Enviado,
+                        EsEliminado = respuesta.EsEliminado
+                    };
+            }
+
+
+            /// Metodo para equiparar los dos tipos de seleccion
+            /// </summary>
+            /// <param name="obj"></param>
+            /// <returns></returns>
+            public override bool Equals(object obj)
+            {
+                if (obj is RespuestaVM other)
+                {
+                    return this.RespuestaId == other.RespuestaId;
+                }
+                return false;
+            }
+
+            /// <summary>
+            /// Metodo para equiparar los dos tipos de seleccion
+            /// </summary>
+            /// <returns></returns>
+            public override int GetHashCode()
+            {
+                return RespuestaId.GetHashCode();
+            }
+        }
+        public override void UpdateModel(OpResul dataResul)
+        {
+            var respuestasList = ((List<Respuesta>)GetData("Correo_GetRespuestas"))
+            .Where(r => r.EsIA == true)
+            .OrderByDescending(c => c.FechaProcesado);
+
+            misContactos = ((List<Contacto>)GetData("Correo_GetContactos"));
+
+            CorreosSalida.Clear();
+            CorreosSalidaPaged.Clear();
+            try
+            {
+                foreach (var respuesta in respuestasList)
+                {
+                    RespuestaVM respuestaVM = (RespuestaVM)respuesta;
+
+                    if (respuestaVM.Destinatarios.Count > 1)
+                    {
+                        respuestaVM.NombreUsuario = respuestaVM.Destinatarios.Count + " Destinatarios";
+                    }
+                    else
+                    {
+                        respuestaVM.NombreUsuario = misContactos.Where(c => c.Email == respuestaVM.Destinatarios[0]).FirstOrDefault().Nombre.ToString();
+                    }
+
+                    Correo miCorreo = (Correo)GetData("Correo_GetCorreoById", respuestaVM.CorreoId);
+
+                    CorreoVM correoAsociado = (CorreoVM)miCorreo;
+
+                    respuestaVM.Correo = correoAsociado;
+
+
+                    CorreosSalida.Add(respuestaVM);
+
+                    if (!CorreosSalidaPaged.Contains(respuestaVM))
+                    {
+                        CorreosSalidaPaged.Add(respuestaVM);
+                    }
+                }
+
+                OnUpdateView?.Invoke();
+            }
+            catch(Exception ex)
+            {
+                Logger.LogLine("Salida", "Error al CARGAR respuestas " + ex.Message, "");
+
+            }
+        }
+    }
+
+    #endregion
+
+    #region PAGINACIÓN
+
+    /// <summary>
+    /// Metodo que dice que Pagina es la Actual
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnPageChanged(Syncfusion.Blazor.Navigations.PageChangedEventArgs args)
+    {
+        CurrentPage = args.CurrentPage;
+        ApplyPagination();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que Aplica la Paginacion
+    /// </summary>
+    private void ApplyPagination()
+    {
+        Console.WriteLine($"searchText en paginación: {searchText}");
+        int startIndex = (CurrentPage - 1) * PageSize;
+
+        var filtered = string.IsNullOrEmpty(searchText)
+            ? bandejaSalida.CorreosSalida
+                .Where(c => c.EsIA && !c.Correo.Eliminado && !c.Enviado)
+                .OrderByDescending(c => c.Fecha)
+                .ToList()
+            : bandejaSalida.CorreosSalida
+                .Where(c =>
+                    c.EsIA &&
+                    !c.Enviado &&
+                    !c.Correo.Eliminado &&
+                    (
+                        c.Remitente.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                        c.Asunto.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                        c.Cuerpo.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+                    ))
+                .OrderByDescending(c => c.Fecha)
+                .ToList();
+
+        bandejaSalida.CorreosSalidaPaged = filtered.Skip(startIndex).ToList();
+    }
+
+    #endregion
+
+    #region SELECCION
+
+    /// <summary>
+    /// Metodo que alterna la seleccion de un correo
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="forzarValor"></param>
+    private void ToggleSeleccion(BandejaSalidaVM.RespuestaVM borrador, bool? forzarValor = null)
+    {
+        bool nuevoEstado = forzarValor ?? !borrador.Seleccionado;
+        borrador.Seleccionado = nuevoEstado;
+
+        if (nuevoEstado)
+        {
+            if (!bandejaSalida.SelectedRespuestas.Contains(borrador))
+                bandejaSalida.SelectedRespuestas.Add(borrador);
+        }
+        else
+        {
+            bandejaSalida.SelectedRespuestas.Remove(borrador);
+        }
+
+        bandejaSalida.SelectedRespuesta = (bandejaSalida.SelectedRespuestas.Count == 1)
+                                              ? bandejaSalida.SelectedRespuestas.First()
+                                              : null;
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se selecciona una fila
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowSelected(RowSelectEventArgs<BandejaSalidaVM.RespuestaVM> args)
+    {
+        if (editando) return;
+        if (!args.IsCtrlPressed && !args.IsShiftPressed)
+        {
+            // Desmarcar todos los seleccionados
+            foreach (var c in bandejaSalida.SelectedRespuestas)
+            {
+                c.Seleccionado = false;
+            }
+            bandejaSalida.SelectedRespuestas.Clear();
+            ToggleSeleccion(args.Data, true); // Selecciona el nuevo
+            bandejaSalida.SelectedRespuesta = args.Data; // Asegúrate de asignar correctamente la respuesta seleccionada
+        }
+        else if (args.IsCtrlPressed)
+        {
+            ToggleSeleccion(args.Data); // Alternar la selección
+        }
+        else if (args.IsShiftPressed && bandejaSalida.SelectedRespuestas.Any())
+        {
+            var allRows = bandejaSalida.CorreosSalidaPaged.ToList();
+            var lastSelected = bandejaSalida.SelectedRespuestas.Last();
+            int start = allRows.IndexOf(lastSelected);
+            int end = allRows.IndexOf(args.Data);
+            if (start > end) (start, end) = (end, start);
+            for (int i = start; i <= end; i++)
+            {
+                ToggleSeleccion(allRows[i], true); // Seleccionar en rango
+            }
+        }
+
+        StateHasChanged(); // Refrescar la vista
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se cambia el estado del checkbox
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="e"></param>
+    private void OnCheckboxChanged(BandejaSalidaVM.RespuestaVM borrador, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        if (editando) return;
+        bool isChecked = Convert.ToBoolean(e.Value);
+        ToggleSeleccion(borrador, isChecked);
+    }
+
+    /// <summary>
+    /// Devuelve true si el correo está seleccionado
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <returns></returns>
+    private bool IsSelected(BandejaSalidaVM.RespuestaVM borrador)
+    {
+        return borrador.Seleccionado;
+    }
+
+    /// <summary>
+    /// Se llama cuando se deslecciona una row
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowDeselected(RowDeselectEventArgs<BandejaSalidaVM.RespuestaVM> args)
+    {
+        ToggleSeleccion(args.Data, false);
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region ADJUNTOS
+
+    private async Task PickFiles()
+    {
+        try
+        {
+            var picks = await FilePicker.PickMultipleAsync();
+            if (picks == null) return;
+
+            foreach (var fp in picks)
+            {
+                using var stream = await fp.OpenReadAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                ms.Position = 0;
+
+                var (Success, FileName, Message) =
+                  await sampleDataService.SaveFilesAsync(new[] { ms }, new[] { fp.FileName });
+
+                if (Success)
+                {
+                    uploadedFilePaths.Add(FileName);
+                    await ShowToast($"'{FileName}' subido.");
+                }
+                else
+                {
+                    await ShowToast(Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al seleccionar: {ex.Message}");
+            Logger.LogLine("Salida", "Error al adjuntar archivos " + ex.Message, "");
+
+        }
+    }
+
+    private async Task RemoveFile(string name)
+    {
+        if (sampleDataService.RemoveFile(name, out var msg))
+        {
+            uploadedFilePaths.Remove(name);
+            await ShowToast($"'{name}' eliminado.");
+        }
+        else
+        {
+            await ShowToast(msg);
+        }
+    }
+
+    private async Task DescargarAdjunto(Adjunto adjunto)
+    {
+        try
+        {
+            using var stream = File.OpenRead(adjunto.Ruta);
+
+            // Usamos la implementación por defecto, sin inyección
+            var result = await FileSaver.Default.SaveAsync(
+                adjunto.Nombre,  // nombre sugerido
+                stream,          // contenido
+                cancellationToken: CancellationToken.None
+            );
+
+            if (result.IsSuccessful)
+                await ShowToast($"¡Archivo guardado!");
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al guardar: {ex.Message}");
+            Logger.LogLine("Salida", "Error al DESCARGAR archivos " + ex.Message, "");
+
+        }
+    }
+
+    private string GetFileIcon(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "bi bi-filetype-pdf",      // PDF
+            ".doc" => "bi bi-filetype-doc",      // Word
+            ".docx" => "bi bi-filetype-doc",      // Word
+            ".xls" => "bi bi-filetype-xls",      // Excel
+            ".xlsx" => "bi bi-filetype-xls",      // Excel
+            ".ppt" => "bi bi-filetype-ppt",      // PowerPoint
+            ".pptx" => "bi bi-filetype-ppt",      // PowerPoint
+            ".zip" => "bi bi-file-earmark-zip",  // ZIP
+            ".jpg" => "bi bi-filetype-jpg",      // JPG
+            ".jpeg" => "bi bi-filetype-jpg",      // JPG
+            ".png" => "bi bi-filetype-png",      // PNG
+            ".gif" => "bi bi-filetype-gif",      // GIF
+            _ => "bi bi-file-earmark"       // genérico
+        };
+    }
+
+    private string GetFileColorClass(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "color:#bf4040;",    // rojo
+            ".doc" => "color:#4083bf;",    // azul
+            ".docx" => "color:#4054bf;",    // azul oscuro
+            ".xls" => "color:#5eae3e;",    // verde
+            ".xlsx" => "color:#3eae48;",    // verde oscuro
+            ".ppt" => "color:#c77e30;",    // naranja
+            ".pptx" => "color:#af712e;",    // naranja oscuro
+            ".zip" => "color:#6e4790;",    // gris
+            ".jpg" => "color:#3a8dac;",    // turquesa
+            ".jpeg" => "color:#3a8dac;",    // turquesa
+            ".png" => "color:#3a8dac;",    // turquesa
+            ".gif" => "color:#3aac61;",    // verde claro
+            _ => "color:#ac9f3a;"     // amarillo
+        };
+    }
+
+    /// <summary>
+    /// Quita un adjunto existente de la respuesta seleccionada
+    /// </summary>
+    private void DeleteAttachment(Adjunto adj)
+    {
+        if (bandejaSalida.SelectedRespuesta?.Adjuntos?.Remove(adj) == true)
+        {
+            StateHasChanged();
+        }
+    }
+
+    #endregion
+
+    #region EDITAR RESPUESTAS
+
+    /// <summary>
+    /// Metodo que activa el Modo Edicion
+    /// </summary>
+    private void OnEditarClick()
+    {
+        editedAsunto = bandejaSalida.SelectedRespuesta.Asunto;
+        originalCuerpo = bandejaSalida.SelectedRespuesta.CuerpoHTML ?? bandejaSalida.SelectedRespuesta.Cuerpo;
+        editedDestinatariosList = new List<string>(bandejaSalida.SelectedRespuesta.Destinatarios);
+        editando = true;
+
+        ApplyPagination();
+
+    }
+
+    /// <summary>
+    /// Metodo que Sobrescribe el Cuerpo de una Respuesta
+    /// </summary>
+    /// <returns></returns>
+    private async Task OnGuardarClick()
+    {
+        if (bandejaSalida.SelectedRespuesta == null)
+        {
+            Console.WriteLine($"[Salida] No se ha enviado nada mi rey");
+            return;  // O mostrar un mensaje de error
+        }
+
+        string nuevoTexto = await editedText.GetXhtmlAsync();
+        bandejaSalida.SetData("Respuesta_RespuestaCuerpo", nuevoTexto, bandejaSalida.SelectedRespuesta.RespuestaId);
+        bandejaSalida.SetData("Respuesta_RespuestaDestinatarios", editedDestinatariosList, bandejaSalida.SelectedRespuesta.RespuestaId);
+        bandejaSalida.SetData("Respuesta_RespuestaAsunto", editedAsunto, bandejaSalida.SelectedRespuesta.RespuestaId);
+        bandejaSalida.SelectedRespuesta.Cuerpo = nuevoTexto;
+        bandejaSalida.SelectedRespuesta.CuerpoHTML = nuevoTexto;
+
+        bandejaSalida.SelectedRespuesta.Asunto = editedAsunto;
+        bandejaSalida.SelectedRespuesta.Destinatarios = editedDestinatariosList;
+
+        var nombreDestinatario = misContactos.Where(c => c.Email == editedDestinatariosList.FirstOrDefault())
+                                               .Select(c => c.Nombre).FirstOrDefault() ?? "Desconocido";
+
+        bandejaSalida.SetData("Respuesta_RespuestaNombreDest", nombreDestinatario, bandejaSalida.SelectedRespuesta.RespuestaId);
+
+        try
+        {
+            Respuesta respuestaAdjuntar = (Respuesta)bandejaSalida.GetData("Correo_GetRespuestaById", bandejaSalida.SelectedRespuesta.RespuestaId);
+            bandejaSalida.Action("Respuesta_AdjuntarArchivo", respuestaAdjuntar, uploadedFilePaths);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogLine("Salida", "Error al GUARDAR respuesta " + ex.Message, "");
+
+            Console.WriteLine("Error al adjuntar archivo: " + ex.Message);
+        }
+
+        await ShowToast("¡Correo Guardado!");
+        uploadedFilePaths.Clear();
+        editando = false;
+    }
+
+    /// <summary>
+    /// Metodo que Cancela el Modo Edicion
+    /// </summary>
+    private void OnCancelarEdicion()
+    {
+        editando = false;
+        bandejaSalida.SelectedRespuesta.Cuerpo = originalCuerpo;
+    }
+
+    #endregion
+
+    #region REGENERAR RESPUESTA
+
+    /// <summary>
+    /// Modifica el selectedCorreo al pulsar el botón
+    /// </summary>
+    private async Task OnRegenerarClick()
+    {
+        try
+        {
+            var destinatariosMap = new Dictionary<int, List<string>>();
+
+            //  Copiamos antes de modificar nada
+            var respuestasSeleccionadas = bandejaSalida.SelectedRespuestas.ToList();
+
+            foreach (var r in respuestasSeleccionadas)
+                destinatariosMap[r.CorreoId] = new List<string>(r.Destinatarios);
+
+            // Usamos el prompt adecuado
+            var prompt = respuestasSeleccionadas.Count > 1 ? iaRequestMultiple : iaRequest;
+
+            if (respuestasSeleccionadas.Count > 1)
+            {
+                foreach (var respuesta in respuestasSeleccionadas)
+                {
+                    await bandejaSalida.Action("Respuesta_RegenerarRespuesta", respuesta.CorreoId, prompt);
+                }
+
+                await ShowToast("¡Correos Regenerados!");
+            }
+            else if (respuestasSeleccionadas.Count == 1)
+            {
+                await bandejaSalida.Action("Respuesta_RegenerarRespuesta", respuestasSeleccionadas[0].CorreoId, prompt);
+                await ShowToast("¡Correo Regenerado!");
+            }
+
+            bandejaSalida.SelectedRespuestas.Clear();
+            bandejaSalida.UpdateModel(OpResul.Range);
+
+            foreach (var vm in bandejaSalida.CorreosSalidaPaged)
+            {
+                if (destinatariosMap.TryGetValue(vm.CorreoId, out var dests))
+                    vm.Destinatarios = dests;
+            }
+
+            iaRequestMultiple = string.Empty;
+            iaRequest = string.Empty;
+            StateHasChanged();
+
+        }
+        catch (Exception ex)
+        {
+            Logger.LogLine("Salida", "Error al REGENERAR respuesta " + ex.Message, "");
+
+        }
+
+    }
+
+    #endregion
+
+    #region ENVIAR RESPUESTAS
+
+    private async Task OnEnviarClick()
+    {
+        try
+        {
+            var respuestas = bandejaSalida.SelectedRespuestas.Count > 1
+                ? bandejaSalida.SelectedRespuestas.ToList() // ¡Copiamos la lista para evitar errores!
+                : (bandejaSalida.SelectedRespuesta != null
+                    ? new List<BandejaSalidaVM.RespuestaVM> { bandejaSalida.SelectedRespuesta }
+                    : new List<BandejaSalidaVM.RespuestaVM>());
+
+            if (!respuestas.Any())
+            {
+                await ShowToast("No hay correos seleccionados.");
+                return;
+            }
+
+            bool todoCorrecto = true;
+
+            foreach (var respuestaVM in respuestas)
+            {
+                var core = (Respuesta)bandejaSalida.GetData("Correo_GetRespuestaById", respuestaVM.RespuestaId);
+
+                var resultTask = bandejaSalida.Action("Respuesta_EnviarRespuesta", core);
+                if (resultTask is Task<object> taskObj)
+                {
+                    var resultObj = await taskObj;
+                    if (resultObj is bool ok && !ok)
+                    {
+                        todoCorrecto = false;
+                    }
+                }
+                else
+                {
+                    todoCorrecto = false;
+                }
+            }
+
+            if (todoCorrecto)
+            {
+                await ShowToast(respuestas.Count > 1 ? "¡Correos enviados!" : "¡Correo enviado!");
+            }
+            else
+            {
+                await ShowToast("Uno o más correos no se pudieron enviar.");
+            }
+
+            bandejaSalida.SelectedRespuestas.Clear();
+            bandejaSalida.UpdateModel(OpResul.Range);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogLine("Salida", "Error al ENVIAR respuesta " + ex.Message, "");
+
+            await ShowToast($"Error inesperado al enviar: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region MEJORAS
+
+    /// <summary>
+    /// Maneja el evento de tecla en el textbox de destinatario.
+    /// - Si se presiona "Enter" y el campo no está vacío, añade el email a la lista de destinatarios y se muestra el chip.
+    /// - Si se presiona "Backspace" y el campo está vacío, se quita el último email de la lista para poder editarlo.
+    /// </summary>
+    private async Task OnKeyDownDestinatario(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(nuevoDestinatario))
+        {
+            // Agrega el destinatario y limpia el campo
+            editedDestinatariosList.Add(nuevoDestinatario.Trim());
+            nuevoDestinatario = string.Empty;
+            StateHasChanged();
+        }
+        else if (e.Key == "Backspace" && string.IsNullOrEmpty(nuevoDestinatario) && editedDestinatariosList.Any())
+        {
+            // Se extrae el último destinatario para permitir su edición
+            nuevoDestinatario = editedDestinatariosList.Last();
+            editedDestinatariosList.RemoveAt(editedDestinatariosList.Count - 1);
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Elimina un destinatario de la lista al hacer clic en el botón de borrar del chip.
+    /// </summary>
+    /// <param name="email">El email a quitar</param>
+    private void QuitarDestinatario(string email)
+    {
+        if (editedDestinatariosList.Contains(email))
+        {
+            editedDestinatariosList.Remove(email);
+        }
+    }
+
+    /// <summary>
+    /// Metodo para que en el Grid se muestre el texto bien
+    /// </summary>
+    /// <param name="input"></param>
+    /// <returns></returns>
+    private string RemoveHtmlTags(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+        // Decodifica primero las entidades HTML
+        string decoded = System.Net.WebUtility.HtmlDecode(input);
+        // Elimina etiquetas HTML con Regex
+        var cleaned = Regex.Replace(decoded, "<.*?>", string.Empty);
+        return cleaned.Trim();
+    }
+
+    private async Task ShowToast(string text)
+    {
+        await toastObj.ShowAsync(new ToastModel
+            {
+                Content = text,
+                CssClass = "custom-toast",
+                Timeout = 3000
+            });
+    }
+
+    private void ToggleView()
+    {
+        showOriginal = !showOriginal;
+        StateHasChanged();
+    }
+
+    #endregion
+
+}

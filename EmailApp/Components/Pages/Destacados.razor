@@ -1,0 +1,654 @@
+﻿@page "/destacados"
+@using CommunityToolkit.Maui.Storage
+@using EmailApp.UseCases.Services
+@using MailAppMAUI.Contexto
+@using MailAppMAUI.General
+@using MailAppMAUI.Core
+@using MailAppMAUI.Controladores
+@using MailAppMAUI.Repositorios
+@using MimeKit
+@using Microsoft.AspNetCore.Components.Forms
+@using MailAppMAUI.UseCases
+@inject GesCorreos _gesCorreos
+@using Syncfusion.Blazor
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Data
+@using Syncfusion.Blazor.Navigations
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Buttons
+@using System.Text.RegularExpressions
+@using System.Collections.ObjectModel
+@using System.Text.Json
+@using Syncfusion.Blazor.Notifications
+@using Logger = Ifs.Comun.Logger;
+@implements IDisposable
+
+<SfToast @ref="toastObj" Timeout="5000">
+    <ToastPosition X="Center" Y="Bottom"></ToastPosition>
+</SfToast>
+
+<!-- Contenedor principal -->
+<div class="page-container">
+    <!-- Contenedor del grid y la paginación -->
+    <div class="grid-pag-container">
+        <!-- Tabla -->
+        <div class="grid-card">
+            <SfGrid @ref="Grid" DataSource="@bandejaDestacados.DestacadosPaged" AllowSelection="true" EnableAdaptiveUI="true" AllowSorting="true" SelectionSettings="@selectionSettings">
+                <GridEvents RowSelected="OnRowSelected" RowDataBound="OnRowDataBound" RowDeselected="OnRowDeselected" TValue="BandejaDestacadosVM.DestacadoVM"></GridEvents>
+                <GridColumns>
+                    <GridColumn Width="3%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            @{
+                                var correoVM = (BandejaDestacadosVM.DestacadoVM)correo;
+                            }
+                            <input type="checkbox"
+                                   @onclick:stopPropagation="true"
+                                   checked="@IsSelected(correoVM)"
+                                   @onchange="@(e => OnCheckboxChanged(correoVM, e))" />
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Width="5%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            @{
+                                // Convertir el objeto al tipo correcto
+                                var correoVM = (BandejaDestacadosVM.DestacadoVM)correo;
+                            }
+                            <div class="destacado-button-container" style="display: flex; justify-content: center; align-items: center;">
+                                <button class="btn custom-star-btn" @onclick="() => ToggleDestacado(correoVM)">
+                                    <i class="@(correoVM.Destacado ? "bi bi-star-fill" : "bi bi-star")"></i>
+                                </button>
+                            </div>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="NombreUsuario" HeaderText="De" Width="8%" TextAlign="TextAlign.Left" />
+                    <GridColumn Field="Asunto" HeaderText="Asunto" Width="10%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis" />
+                    <GridColumn Field="Cuerpo" HeaderText="Mensaje" Width="26%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis">
+                        <Template Context="cuerpo">
+                            @RemoveHtmlTags((cuerpo as BandejaDestacadosVM.DestacadoVM).Cuerpo)
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Fecha" Width="10%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            @{
+                                var correoVM = (BandejaDestacadosVM.DestacadoVM)correo;
+                                var fecha = correoVM.Fecha;
+                                var hoy = DateTime.Today;
+
+                                string textoFecha = (fecha.Date == hoy)
+                                ? fecha.ToString("HH:mm")
+                                : fecha.ToString("dd/MM");
+                            }
+                            <span>@textoFecha</span>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
+        </div>
+    </div>
+
+    <!-- Panel de detalle del correo -->
+    @if (bandejaDestacados.SelectedCorreos.Count > 0)
+    {
+        <div class="detail-card @(bandejaDestacados.SelectedCorreos.Count > 1 ? "centered-card" : "")">
+            @if (bandejaDestacados.SelectedCorreos.Count == 1 && bandejaDestacados.SelectedDestacado != null)
+            {
+                <div class="correo-detalle">
+                    <span class="entrada-name">@bandejaDestacados.SelectedDestacado.Asunto</span>
+                    <p></p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                        <div>
+                            <span class="entrada-subtext">De:</span>
+                            <span class="chips-container">
+                                <span class="chip">@bandejaDestacados.SelectedDestacado.Remitente</span>
+                            </span>
+                        </div>
+                        <div style="font-size: 12px; color: #777; margin-top: 5px;">
+                            @{
+                                var fechaFormateada = bandejaDestacados.SelectedDestacado.Fecha
+                                .ToString("dddd, dd 'de' MMMM 'de' yyyy HH:mm", new System.Globalization.CultureInfo("es-ES"));
+                                fechaFormateada = char.ToUpper(fechaFormateada[0]) + fechaFormateada[1..];
+                            }
+                            @fechaFormateada
+                        </div>
+                    </div>
+
+                    <div class="correo-detalle-cuerpo-entrada">
+                        <p>@(new MarkupString(bandejaDestacados.SelectedDestacado.CuerpoHTML))</p>
+                    </div>
+
+                    <!-- Adjuntos -->
+                    @if (bandejaDestacados.SelectedDestacado.Adjuntos != null && bandejaDestacados.SelectedDestacado.Adjuntos.Any())
+                    {
+                        <ul class="chipUpload-container">
+                            @foreach (var adjunto in bandejaDestacados.SelectedDestacado.Adjuntos)
+                            {
+                                <li class="chipUpload">
+                                    <i class="@GetFileIcon(adjunto.Nombre) no-margin-icon"
+                                       style="@GetFileColorClass(adjunto.Nombre) margin-right:6px;"></i>
+                                    <a href="javascript:void(0)"
+                                       class="adjunto-name"
+                                       @onclick="() => DescargarAdjunto(adjunto)">
+                                        @adjunto.Nombre
+                                    </a>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+            else
+            {
+                <!-- TARJETA CENTRADA DE MULTI-SELECCIÓN -->
+                <div class="centered-content">
+                    <i class="bi bi-envelope-fill big-envelope-icon"></i>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; margin-top: 25px;">
+                        <button class="multiple-btn" @onclick="QuitarDestacadoSeleccionados">
+                            <i class="bi bi-star no-margin-icon"></i> Quitar destacado
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+
+    #region COMPONENTES DE LA VISTA
+
+    public SfGrid<BandejaDestacadosVM.DestacadoVM> Grid;
+    private int PageSize = 10;
+    private int CurrentPage = 1;
+    private string searchText = string.Empty;
+
+    private bool initialSelectionDone = false;
+    private BandejaDestacadosVM bandejaDestacados;
+
+    public static event System.Action OnUpdateView;
+
+    List<string> uploadedFilePaths = new List<string>();
+
+    private SfToast toastObj;
+
+    [CascadingParameter] public EventCallback<string> OnSearch { get; set; }
+
+    private Syncfusion.Blazor.Grids.GridSelectionSettings selectionSettings = new Syncfusion.Blazor.Grids.GridSelectionSettings
+        {
+            Type = Syncfusion.Blazor.Grids.SelectionType.Multiple,
+            Mode = Syncfusion.Blazor.Grids.SelectionMode.Row
+        };
+
+    private void HandleSearch(string query)
+    {
+        Console.WriteLine($"[Destacados] Recibido search: {query}");
+        searchText = query;  // Actualizamos la variable si es necesario
+        ApplyPagination();
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnInitialized()
+    {
+        bandejaDestacados ??= new BandejaDestacadosVM(_gesCorreos);
+
+        SearchService.OnSearch += HandleSearch;
+
+        // Suscribirse a los eventos de actualización de correos
+        CorreoRepository.OnUpdateCorreo += bandejaDestacados.UpdateModel;
+        // CorreoRepository.OnUpdateCorreo += UpdateView;
+
+        OnUpdateView += UpdateView;
+
+        UpdateView();
+        ApplyPagination();
+    }
+
+    public void Dispose()
+    {
+        SearchService.OnSearch -= HandleSearch;
+        CorreoRepository.OnUpdateCorreo -= bandejaDestacados.UpdateModel;
+        // CorreoRepository.OnUpdateCorreo -= UpdateView;
+        OnUpdateView -= UpdateView;
+    }
+
+    public void UpdateView()
+    {
+        Grid?.Refresh();
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region VIEWMODEL
+
+    public class BandejaDestacadosVM : VModelBase
+    {
+        public BandejaDestacadosVM(IAction gesCorreos) : base(gesCorreos)
+        {
+            UpdateModel(OpResul.Range);
+        }
+
+        public ObservableCollection<DestacadoVM> Destacados { get; set; } = new();
+        public List<DestacadoVM> DestacadosPaged { get; set; } = new();
+        public DestacadoVM? SelectedDestacado { get; set; }
+        public List<DestacadoVM?> SelectedCorreos { get; set; } = new();            //Correos selecionados
+
+
+        /// <summary>
+        /// Clase para representar los correos destacados
+        /// </summary>
+        public class DestacadoVM
+        {
+            public string NombreUsuario { get; set; } = string.Empty;
+            public string Remitente { get; set; } = string.Empty;
+            public string DestinatarioStr { get; set; } = string.Empty;
+            public string Asunto { get; set; } = string.Empty;
+            public string Cuerpo { get; set; } = string.Empty;
+            public DateTime Fecha { get; set; }
+            public int CorreoId { get; set; }
+            public List<Adjunto> Adjuntos { get; set; }
+            public string CuerpoHTML { get; set; }
+            public bool Leido { get; set; }
+            public bool Destacado { get; set; }
+            public bool Seleccionado { get; set; }
+            public bool EsEliminado { get; set; }
+
+            /// <summary>
+            /// Conversor explícito de Correo a DestacadoVM
+            /// </summary>
+            /// <param name="correo">Correo a convertir</param>
+            public static explicit operator DestacadoVM(Correo correo)
+            {
+                return new DestacadoVM
+                    {
+                        CorreoId = correo.CorreoId,
+                        Remitente = correo?.Remitente ?? string.Empty,
+                        DestinatarioStr = string.Join(", ", correo.Destinatarios),
+                        Asunto = correo?.Asunto ?? string.Empty,
+                        Cuerpo = correo?.Cuerpo ?? string.Empty,
+                        Fecha = correo.FechaRecibido,
+                        Adjuntos = correo.Adjuntos,
+                        EsEliminado = correo.Eliminado,
+                        CuerpoHTML = correo.CuerpoHTML,
+                        Leido = correo.Leido,
+                        Destacado = correo.Destacado  // <-- Asignación del estado destacado
+                    };
+            }
+        }
+
+        public override void UpdateModel(OpResul dataResul)
+        {
+            // Obtiene todos los correos y filtra aquellos marcados como Destacado
+            var correos = ((List<Correo>)GetData("Correo_GetCorreos"))
+                          .Where(c => c.Destacado == true && c.Eliminado == false)
+                          .OrderByDescending(c => c.FechaRecibido)
+                          .ToList();
+
+            var contactos = ((List<Contacto>)GetData("Correo_GetContactos"));
+            Destacados.Clear();
+            DestacadosPaged.Clear();
+
+            foreach (var correo in correos)
+            {
+                DestacadoVM destacadoVM = (DestacadoVM)correo;
+
+                if (correo.Destinatarios.Count > 1)
+                {
+                    destacadoVM.NombreUsuario = correo.Destinatarios.Count + " Destinatarios";
+                }
+                else
+                {
+                    Contacto contacto = contactos.Where(c => c.Email == correo.Remitente).FirstOrDefault();
+                    if (contacto != null)
+                    {
+                        destacadoVM.NombreUsuario = contacto.Nombre.ToString();
+                    }
+                }
+
+                Destacados.Add(destacadoVM);
+
+                if (!DestacadosPaged.Contains(destacadoVM))
+                {
+                    DestacadosPaged.Add(destacadoVM);
+                }
+            }
+
+            OnUpdateView?.Invoke();
+        }
+    }
+
+    #endregion
+
+    #region PAGINACIÓN
+
+    private void OnPageChanged(Syncfusion.Blazor.Navigations.PageChangedEventArgs args)
+    {
+        CurrentPage = args.CurrentPage;
+        ApplyPagination();
+    }
+
+    private void ApplyPagination()
+    {
+        int startIndex = (CurrentPage - 1) * PageSize;
+
+        var filtered = string.IsNullOrEmpty(searchText)
+            ? bandejaDestacados.Destacados
+                .Where(d => d.Destacado && !d.EsEliminado)
+                .OrderByDescending(d => d.Fecha)
+                .ToList()
+            : bandejaDestacados.Destacados
+                .Where(d =>
+                    d.Destacado &&
+                    !d.EsEliminado &&
+                    (
+                        d.Asunto.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                        d.Cuerpo.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                        d.DestinatarioStr.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+                    ))
+                .OrderByDescending(d => d.Fecha)
+                .ToList();
+
+        bandejaDestacados.DestacadosPaged = filtered.Skip(startIndex).ToList();
+
+        if (bandejaDestacados.DestacadosPaged.Any())
+        {
+            bandejaDestacados.SelectedDestacado = bandejaDestacados.DestacadosPaged.First();
+        }
+        else
+        {
+            bandejaDestacados.SelectedDestacado = null;
+        }
+        Grid?.Refresh();
+    }
+
+    #endregion
+
+    #region SELECCION
+
+    private void ToggleSeleccion(BandejaDestacadosVM.DestacadoVM correo, bool? forzarValor = null)
+    {
+        bool nuevoEstado = forzarValor ?? !correo.Seleccionado;
+        correo.Seleccionado = nuevoEstado;
+
+        if (nuevoEstado)
+        {
+            if (!bandejaDestacados.SelectedCorreos.Contains(correo))
+                bandejaDestacados.SelectedCorreos.Add(correo);
+        }
+        else
+        {
+            bandejaDestacados.SelectedCorreos.Remove(correo);
+        }
+
+        bandejaDestacados.SelectedDestacado = (bandejaDestacados.SelectedCorreos.Count == 1)
+                                          ? bandejaDestacados.SelectedCorreos.First()
+                                          : null;
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se selecciona una fila
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowSelected(RowSelectEventArgs<BandejaDestacadosVM.DestacadoVM> args)
+    {
+        if (!args.IsCtrlPressed && !args.IsShiftPressed)
+        {
+            foreach (var c in bandejaDestacados.SelectedCorreos)
+                c.Seleccionado = false;
+
+            bandejaDestacados.SelectedCorreos.Clear();
+
+            ToggleSeleccion(args.Data, true); // Selecciona el nuevo
+
+            return;
+        }
+
+        if (args.IsCtrlPressed)
+        {
+            ToggleSeleccion(args.Data); // alterna
+        }
+        else if (args.IsShiftPressed && bandejaDestacados.SelectedCorreos.Any())
+        {
+            var allRows = bandejaDestacados.DestacadosPaged.ToList();
+            var lastSelected = bandejaDestacados.SelectedCorreos.Last();
+            int start = allRows.IndexOf(lastSelected);
+            int end = allRows.IndexOf(args.Data);
+            if (start > end) (start, end) = (end, start);
+            for (int i = start; i <= end; i++)
+            {
+                ToggleSeleccion(allRows[i], true);
+            }
+        }
+        else
+        {
+            // Selección única
+            foreach (var corr in bandejaDestacados.SelectedCorreos)
+            {
+                corr.Seleccionado = false;
+            }
+            bandejaDestacados.SelectedCorreos.Clear();
+
+            ToggleSeleccion(args.Data, true);
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se cambia el estado del checkbox
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="e"></param>
+    private void OnCheckboxChanged(BandejaDestacadosVM.DestacadoVM correo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        bool isChecked = Convert.ToBoolean(e.Value);
+        ToggleSeleccion(correo, isChecked);
+    }
+
+    /// <summary>
+    /// Devuelve true si el correo está seleccionado
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <returns></returns>
+    private bool IsSelected(BandejaDestacadosVM.DestacadoVM correo)
+    {
+        return correo.Seleccionado;
+    }
+
+    /// <summary>
+    /// Se llama cuando se deslecciona una row
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowDeselected(RowDeselectEventArgs<BandejaDestacadosVM.DestacadoVM> args)
+    {
+        if (!args.Data.Leido)
+        {
+            args.Data.Leido = true;
+            bandejaDestacados.Action("Correo_MarcarComoLeido", args.Data.CorreoId, new object[] { true });
+        }
+
+        // Asegura que la deselección se refleja en todos lados (modelo y UI)
+        ToggleSeleccion(args.Data, false);
+
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region ADJUNTOS
+
+    private async Task DescargarAdjunto(Adjunto adjunto)
+    {
+        try
+        {
+            using var stream = File.OpenRead(adjunto.Ruta);
+
+            // Usamos la implementación por defecto, sin inyección
+            var result = await FileSaver.Default.SaveAsync(
+                adjunto.Nombre,  // nombre sugerido
+                stream,          // contenido
+                cancellationToken: CancellationToken.None
+            );
+
+            if (result.IsSuccessful)
+                await ShowToast($"¡Archivo guardado!");
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al guardar: {ex.Message}");
+        }
+    }
+
+    private string GetFileIcon(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "bi bi-filetype-pdf",      // PDF
+            ".doc" => "bi bi-filetype-doc",      // Word
+            ".docx" => "bi bi-filetype-doc",      // Word
+            ".xls" => "bi bi-filetype-xls",      // Excel
+            ".xlsx" => "bi bi-filetype-xls",      // Excel
+            ".ppt" => "bi bi-filetype-ppt",      // PowerPoint
+            ".pptx" => "bi bi-filetype-ppt",      // PowerPoint
+            ".zip" => "bi bi-file-earmark-zip",  // ZIP
+            ".jpg" => "bi bi-filetype-jpg",      // JPG
+            ".jpeg" => "bi bi-filetype-jpg",      // JPG
+            ".png" => "bi bi-filetype-png",      // PNG
+            ".gif" => "bi bi-filetype-gif",      // GIF
+            _ => "bi bi-file-earmark"       // genérico
+        };
+    }
+
+    private string GetFileColorClass(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "color:#bf4040;",    // rojo
+            ".doc" => "color:#4083bf;",    // azul
+            ".docx" => "color:#4054bf;",    // azul oscuro
+            ".xls" => "color:#5eae3e;",    // verde
+            ".xlsx" => "color:#3eae48;",    // verde oscuro
+            ".ppt" => "color:#c77e30;",    // naranja
+            ".pptx" => "color:#af712e;",    // naranja oscuro
+            ".zip" => "color:#6e4790;",    // gris
+            ".jpg" => "color:#3a8dac;",    // turquesa
+            ".jpeg" => "color:#3a8dac;",    // turquesa
+            ".png" => "color:#3a8dac;",    // turquesa
+            ".gif" => "color:#3aac61;",    // verde claro
+            _ => "color:#ac9f3a;"     // amarillo
+        };
+    }
+    #endregion
+
+    #region DESTACAR CORREO
+
+    private async Task ToggleDestacado(BandejaDestacadosVM.DestacadoVM correo)
+    {
+        // Alterna la propiedad localmente
+        correo.Destacado = !correo.Destacado;
+
+        // Según el nuevo estado, llama al backend
+        if (correo.Destacado)
+        {
+            bandejaDestacados.SetData("Correo_DestacarCorreo", "", correo.CorreoId);
+        }
+        else
+        {
+            bandejaDestacados.SetData("Correo_NoDestacarCorreo", "", correo.CorreoId);
+        }
+
+        // Actualiza la vista
+        StateHasChanged();
+    }
+
+    private async Task DestacarSeleccionados()
+    {
+        List<BandejaDestacadosVM.DestacadoVM> correosDestacados = new List<BandejaDestacadosVM.DestacadoVM>();
+
+        bandejaDestacados.Action("Correo_DestacarListaCorreos", bandejaDestacados.SelectedCorreos.Select(c => c.CorreoId).ToList(), true);
+
+        foreach (var correoSeleccionado in bandejaDestacados.SelectedCorreos.ToList())
+        {
+            // Llama al backend para destacar el correo
+            if (!correoSeleccionado.Destacado)
+            {
+                correoSeleccionado.Destacado = true;
+                // bandejaDestacados.SetData("Correo_DestacarCorreo", "", correoSeleccionado.CorreoId);
+                correosDestacados.Add(correoSeleccionado);
+            }
+            else
+            {
+                Console.WriteLine("Correo ya estaba destacado");
+            }
+        }
+
+        // Limpia la selección después de procesar
+        bandejaDestacados.SelectedCorreos.Clear();
+
+        // Actualiza la vista
+        StateHasChanged();
+    }
+
+    private async Task QuitarDestacadoSeleccionados()
+    {
+        List<BandejaDestacadosVM.DestacadoVM> correosDesmarcados = new List<BandejaDestacadosVM.DestacadoVM>();
+
+        bandejaDestacados.Action("Correo_DestacarListaCorreos", bandejaDestacados.SelectedCorreos.Select(c => c.CorreoId).ToList(), false);
+
+        foreach (var correoSeleccionado in bandejaDestacados.SelectedCorreos.ToList())
+        {
+            // Llama al backend para quitar el destacado del correo
+            if (correoSeleccionado.Destacado)
+            {
+                correoSeleccionado.Destacado = false;
+                // bandejaDestacados.SetData("Correo_NoDestacarCorreo", "", correoSeleccionado.CorreoId);
+                correosDesmarcados.Add(correoSeleccionado);
+            }
+            else
+            {
+                Console.WriteLine("Correo ya estaba Desdestacado");
+            }
+        }
+
+        // Limpia la selección después de procesar
+        bandejaDestacados.SelectedCorreos.Clear();
+
+        // Actualiza la vista
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region MEJORAS
+
+    private void OnRowDataBound(RowDataBoundEventArgs<BandejaDestacadosVM.DestacadoVM> args)
+    {
+        if (args.Data != null)
+        {
+            if (args.Data.Leido)
+            {
+                args.Row.AddClass(new string[] { "read-row" });
+            }
+        }
+    }
+
+    private string RemoveHtmlTags(string input)
+    {
+        return Regex.Replace(input, "<.*?>", string.Empty);
+    }
+
+    private async Task ShowToast(string text)
+    {
+        await toastObj.ShowAsync(new ToastModel
+            {
+                Content = text,
+                CssClass = "custom-toast",
+                Timeout = 3000
+            });
+    }
+
+    #endregion
+}

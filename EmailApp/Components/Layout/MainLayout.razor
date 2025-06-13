@@ -1,0 +1,46 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager Navigation
+
+@if (!IsLoginOrRegister)
+{
+    <div class="layout-container">
+        <!-- Cabecera fija en la parte superior -->
+        <div class="fixed-header">
+            <NavTop IsCollapsed="@collapseNav" OnToggle="@ToggleNav" />
+        </div>
+
+        <!-- Contenedor de la sidebar y el contenido principal -->
+        <div class="content-container">
+            <!-- Sidebar solo para el menú; se le asigna la clase según el estado -->
+            <div class="sidebar @(collapseNav ? "collapsed" : "expanded")">
+                <NavMenu IsCollapsed="@collapseNav" />
+            </div>
+            <main>
+                <article class="content px-4 @(collapseNav ? "nav-collapsed" : "")">
+                    @Body
+                </article>
+
+            </main>
+        </div>
+    </div>
+}
+else
+{
+    <!-- Layout simplificado para login o registro -->
+    <div class="login-register-container">
+        @Body
+    </div>
+}
+
+@code {
+    private bool collapseNav = false;
+    private void ToggleNav()
+    {
+        collapseNav = !collapseNav;
+    }
+
+    private bool IsLoginOrRegister =>
+       Navigation.Uri.EndsWith("/login-normal") || Navigation.Uri.Contains("/registrarse") || Navigation.Uri.EndsWith("/");
+}
+
+

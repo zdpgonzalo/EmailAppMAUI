@@ -1,0 +1,1108 @@
+﻿@page "/borradores"
+
+@using EmailApp.UseCases.Services
+@using MailAppMAUI.Contexto
+@using MailAppMAUI.General
+@using MailAppMAUI.Core
+@using MailAppMAUI.Controladores
+@using MailAppMAUI.Repositorios
+@using MailAppMAUI.UseCases
+
+@using MimeKit
+@using CommunityToolkit.Maui.Storage
+@using Microsoft.AspNetCore.Components.Forms;
+
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Data
+@using Syncfusion.Blazor.Navigations
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Buttons
+@using Syncfusion.Blazor.RichTextEditor
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Notifications
+@using Syncfusion.Blazor
+
+@using System.Text.RegularExpressions
+@using System.Collections.ObjectModel
+@using System.Net.Http;
+@using System.Net.Http.Headers;
+@using System.Text.Json
+@using System.IO;
+@using System
+
+@inject GesCorreos _gesCorreos
+@inject RepositoryManager repositoryManager
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<SfToast @ref="toastObj" Timeout="5000">
+    <ToastPosition X="Center" Y="Bottom"></ToastPosition>
+</SfToast>
+
+<!-- Contenedor principal -->
+<div class="page-container">
+
+    <!-- Contenedor del grid y la paginación -->
+    <div class="grid-pag-container">
+        <!-- Tabla -->
+        <div class="grid-card">
+            <SfGrid @ref="Grid" DataSource="@bandejaBorradores.BorradoresPaged" EnableAdaptiveUI="true" AllowSelection="@(!editando)" AllowSorting="true" SelectionSettings="@selectionSettings">
+                <GridEvents RowSelected="OnRowSelected" RowDeselected="OnRowDeselected" TValue="BandejaBorradoresVM.BorradorVM"></GridEvents>
+                <GridColumns>
+                    <GridColumn Width="4%" TextAlign="TextAlign.Center">
+                        <Template Context="borrador">
+                            @{
+                                var borradorVM = (BandejaBorradoresVM.BorradorVM)borrador;
+                            }
+                            <input type="checkbox"
+                                   @onclick:stopPropagation="true"
+                                   checked="@IsSelected(borradorVM)"
+                                   disabled="@editando"
+                                   @onchange="@(e => OnCheckboxChanged(borradorVM, e))" />
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Para" Width="10%" TextAlign="TextAlign.Left">
+                        <Template Context="borrador">
+                            @{
+                                var vm = (BandejaBorradoresVM.BorradorVM)borrador;
+                                @vm.NombreUsuario;
+                            }
+                            
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="Asunto" HeaderText="Asunto" Width="10%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis" />
+                    <GridColumn Field="CuerpoHTML" HeaderText="Mensaje" Width="30%" TextAlign="TextAlign.Left" ClipMode="ClipMode.Ellipsis">
+                        <Template Context="cuerpo">
+                            @RemoveHtmlTags((cuerpo as BandejaBorradoresVM.BorradorVM).CuerpoHTML ?? (cuerpo as BandejaBorradoresVM.BorradorVM).Cuerpo)
+                        </Template>
+                    </GridColumn>
+                    <GridColumn HeaderText="Fecha" Width="6%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            @{
+                                var borradorVM = (BandejaBorradoresVM.BorradorVM)correo;
+                                var fecha = borradorVM.Fecha;
+                                var hoy = DateTime.Today;
+
+                                string textoFecha = (fecha.Date == hoy)
+                                ? fecha.ToString("HH:mm")
+                                : fecha.ToString("dd/MM");
+                            }
+                            <span>@textoFecha</span>
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Width="7%" TextAlign="TextAlign.Center">
+                        <Template Context="correo">
+                            <div class="delete-button-container" style="@( (bandejaBorradores.SelectedBorradores.Contains(correo) && bandejaBorradores.SelectedBorradores.Count == 1)
+            ? "visibility: visible;" : "visibility: hidden;") display: flex; justify-content: center; align-items: center;">
+                                <button class="btn custom-delete-btn" @onclick="EliminarCorreo">
+                                    <i class="bi bi-backspace-fill no-margin"></i>
+                                </button>
+                            </div>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
+        </div>
+    </div>
+
+    <!-- Panel de detalle del correo -->
+    @if (bandejaBorradores.SelectedBorradores.Count > 0)
+    {
+        <div class="detail-card @(bandejaBorradores.SelectedBorradores.Count > 1 ? "centered-card" : "")">
+            @if (bandejaBorradores.SelectedBorradores.Count == 1 && bandejaBorradores.SelectedBorrador != null)
+            {
+                <div class="correo-detalle">
+                    <!-- Zona de Botones -->
+                    <div class="correo-detalle-botones">
+                        @if (editando)
+                        {
+                            <SfButton OnClick="OnGuardarClick" CssClass="mail-btn">Guardar</SfButton>
+                            <SfButton OnClick="OnCancelarEdicion" CssClass="mail-btn">Cancelar</SfButton>
+                        }
+                        else
+                        {
+                            <SfButton OnClick="OnEnviarClick" CssClass="enviar-btn">Enviar</SfButton>
+                            <SfButton OnClick="OnEditarClick" CssClass="mail-btn">Editar</SfButton>
+                        }
+                    </div>
+
+                    <!-- Zona de Contenido -->
+                    <div class="correo-detalle-contenido">
+                        <p></p>
+                        <!-- Asunto -->
+                        @if (editando)
+                        {
+                            <div class="field-row">
+                                <span class="salida-name" style="margin-right:10px;">Asunto:</span>
+                                <div class="asunto-edit">
+                                    <SfTextBox @bind-Value="editedAsunto" Placeholder="Editar asunto" Style="display:inline-block" />
+                                </div>
+                                <p></p>
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="salida-name">Respuesta: @bandejaBorradores.SelectedBorrador.Asunto</span>
+                            <p></p>
+                        }
+
+
+                        <!-- Destinatario -->
+                        @if (editando)
+                        {
+                            <div class="destinatarios-edit">
+                                <div class="field-row">
+                                    <span class="salida-subtext" style="margin-right:10px;">Destinatario:</span>
+                                    <div class="asunto-edit">
+                                        <SfTextBox @bind-Value="nuevoDestinatario"
+                                                   Placeholder="Escribe un correo y presiona Enter"
+                                                   Style="display:inline-block"
+                                                   @onkeyup="@(async (e) => await OnKeyDownDestinatario(e))" />
+                                    </div>
+                                </div>
+
+                                <div class="chips-container">
+                                    @foreach (var email in editedDestinatariosList)
+                                    {
+                                        <span class="chip">
+                                            @email
+                                            <button type="button" class="btn custom-delete-btn" @onclick="() => QuitarDestinatario(email)">
+                                                <i class="bi bi-backspace-fill no-margin"></i>
+                                            </button>
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                                <div>
+                                    <span class="salida-subtext">Para:</span>
+                                    <span class="chips-container">
+                                        @foreach (var dest in bandejaBorradores.SelectedBorrador.Destinatarios)
+                                        {
+                                            <span class="chip">@dest</span>
+                                        }
+                                    </span>
+                                </div>
+                                <div style="font-size: 12px; color: #777; margin-top: 5px;">
+                                    @{
+                                        var fechaFormateada = bandejaBorradores.SelectedBorrador.Fecha
+                                        .ToString("dddd, dd 'de' MMMM 'de' yyyy HH:mm", new System.Globalization.CultureInfo("es-ES"));
+                                        fechaFormateada = char.ToUpper(fechaFormateada[0]) + fechaFormateada[1..];
+                                    }
+                                    @fechaFormateada
+                                </div>
+                            </div>
+                        }
+
+                        <p></p>
+
+                        <!-- Cuerpo del correo -->
+                        @if (editando)
+                        {
+                            <SfRichTextEditor @ref="editedText" Height="300px">
+                                <p>
+                                    @(new MarkupString((bandejaBorradores.SelectedBorrador.CuerpoHTML ?? string.Empty)
+                                        .Replace("\n", "<br>")))
+                                </p>
+                            </SfRichTextEditor>
+
+                            <!-- Componente SfUploader configurado para auto subidas -->
+                            <button class="newUpload-btn" @onclick="PickFiles">Subir Archivos</button>
+                            <ul class="chipUpload-container">
+                                @foreach (var name in uploadedFilePaths)
+                                {
+                                    <li class="chipUpload">
+                                        <i class="@GetFileIcon(name) no-margin-icon" style="@GetFileColorClass(name) margin-right:6px;"></i>
+                                        @name
+                                        <button class="btn custom-delete-btn" @onclick="() => RemoveFile(name)">
+                                            <i class="bi bi-backspace-fill"></i>
+                                        </button>
+                                    </li>
+                                }
+                            </ul>
+
+                            <p></p>
+                        }
+                        else
+                        {
+                            <div class="correo-detalle-cuerpo">
+                                <p>
+                                    @(new MarkupString((bandejaBorradores.SelectedBorrador.CuerpoHTML ?? string.Empty)
+                                        .Replace("\n", "<br>")))
+                                </p>
+                            </div>
+                        }
+
+                        <p></p>
+
+                        <!-- Adjuntos -->
+                        @if (bandejaBorradores.SelectedBorrador.Adjuntos != null && bandejaBorradores.SelectedBorrador.Adjuntos.Any())
+                        {
+                            <ul class="chipUpload-container">
+                                @foreach (var adjunto in bandejaBorradores.SelectedBorrador.Adjuntos)
+                                {
+                                    <li class="chipUpload">
+                                        <i class="@GetFileIcon(adjunto.Nombre) no-margin-icon"
+                                           style="@GetFileColorClass(adjunto.Nombre) margin-right:6px;"></i>
+                                        <a href="javascript:void(0)"
+                                           class="adjunto-name"
+                                           @onclick="() => DescargarAdjunto(adjunto)">
+                                            @adjunto.Nombre
+                                        </a>                                        <button type="button" class="btn custom-delete-btn"
+                                                                                            @onclick="() => DeleteAttachment(adjunto)">
+                                            <i class="bi bi-backspace-fill"></i>
+                                        </button>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
+                    </div>
+
+                </div>
+
+            }
+            else
+            {
+                <!-- TARJETA CENTRADA DE MULTI-SELECCIÓN -->
+                <div class="centered-content">
+                    <i class="bi bi-envelope-fill big-envelope-icon" style="margin-left: 15px !important;"></i>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; margin-top: 25px;">
+                        <button class="multiple-btn" @onclick="OnEnviarClick">
+                            <i class="bi bi-send no-margin-icon"></i> Enviar
+                        </button>
+                        <button class="multiple-btn" @onclick="EliminarCorreo">
+                            <i class="bi bi-trash no-margin-icon"></i> Eliminar
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+
+    #region COMPONENTES DE LA VISTA
+
+    // Variables básicas
+
+    private SfGrid<BandejaBorradoresVM.BorradorVM> Grid;
+    private BandejaBorradoresVM bandejaBorradores;
+
+    private int PageSize = 10;
+    private int CurrentPage = 1;
+    private string searchText = string.Empty;
+
+    // Variables de subida de archivos
+
+    private SfUploader uploader = new();
+    List<string> uploadedFilePaths = new List<string>();
+
+    // Variables de Edicion
+
+    private bool editando = false;
+    private string originalCuerpo;
+    private string textoEditor = string.Empty;
+    private string editedDestinatarios = string.Empty;
+    private string editedAsunto = string.Empty;
+    private SfRichTextEditor editedText = new();
+    private string nuevoDestinatario = string.Empty;
+    private List<string> editedDestinatariosList = new List<string>();
+
+    // Otros
+    public static event System.Action OnUpdateView;
+
+    private SfToast toastObj;
+    private bool showOriginal = false;
+    private string iaRequest = string.Empty;
+
+    [CascadingParameter] public EventCallback<string> OnSearch { get; set; }
+    [Inject] SampleDataService sampleDataService { get; set; }
+    private Syncfusion.Blazor.Grids.GridSelectionSettings selectionSettings = new Syncfusion.Blazor.Grids.GridSelectionSettings
+        {
+            Type = Syncfusion.Blazor.Grids.SelectionType.Multiple,
+            Mode = Syncfusion.Blazor.Grids.SelectionMode.Row
+        };
+
+    // Métodos Básicos
+
+    private void HandleSearch(string query)
+    {
+        Console.WriteLine($"[Borradores] Recibido search: {query}");
+        searchText = query;  // Actualizamos la variable si es necesario
+        ApplyPagination();
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnInitialized()
+    {
+        bandejaBorradores = new(_gesCorreos, repositoryManager);
+
+        SearchService.OnSearch += HandleSearch;
+
+        RespuestaRepository.OnUpdateRespuesta += bandejaBorradores.UpdateModel;
+        // RespuestaRepository.OnUpdateRespuesta += UpdateView;
+
+        OnUpdateView += UpdateView;
+
+        UpdateView();
+
+        ApplyPagination();
+        // _ = JSRuntime.InvokeVoidAsync("reloadOnce", "recargaBorradores");
+    }
+
+    public void Dispose()
+    {
+        SearchService.OnSearch -= HandleSearch;
+        RespuestaRepository.OnUpdateRespuesta -= bandejaBorradores.UpdateModel;
+        // RespuestaRepository.OnUpdateRespuesta -= UpdateView;
+    }
+
+    public void UpdateView()
+    {
+        if (Grid != null)
+        {
+            Grid?.Refresh();
+        }
+        ApplyPagination(); // si hace falta
+        InvokeAsync(StateHasChanged);
+    }
+
+    #endregion
+
+    #region VIEWMODEL
+
+    /// <summary>
+    /// Clase Viewmodel de la vista
+    /// </summary>
+    public class BandejaBorradoresVM : VModelBase
+    {
+        public static RepositoryManager repositoryManager;
+
+        int borradoresPerPage;
+        public BandejaBorradoresVM(IAction gesCorreos, RepositoryManager repository) : base(gesCorreos)
+        {
+            repositoryManager = repository;
+            UpdateModel(OpResul.Range);
+        }
+
+        public ObservableCollection<BorradorVM> Borradores { get; set; } = new();
+        public List<BorradorVM> BorradoresPaged { get; set; } = new();
+        public BorradorVM? SelectedBorrador { get; set; }
+        public List<BorradorVM> SelectedBorradores { get; set; } = new();
+
+        /// <summary>
+        /// Clase para representar los Correos
+        /// </summary>
+        public class CorreoVM
+        {
+            public string Remitente { get; set; } = string.Empty;
+            public string Asunto { get; set; } = string.Empty;
+            public string Cuerpo { get; set; } = string.Empty;
+            public DateTime Fecha { get; set; }
+
+            public string AsuntoResum { get => Asunto.Length > 35 ? Asunto.Substring(0, 35) + "..." : Asunto; }
+            public string CuerpoResum { get => Cuerpo.Length > 75 ? Cuerpo.Substring(0, 75) + "..." : Cuerpo; }
+
+            /// <summary>
+            /// Conversor explicito de CorreoCore a CorreoVM
+            /// </summary>
+            /// <param name="correo">Correo a convertir</param>
+            public static explicit operator CorreoVM(Correo correo)
+            {
+                return new CorreoVM
+                    {
+                        Remitente = correo.Remitente,
+                        Asunto = correo.Asunto ?? string.Empty,
+                        Cuerpo = correo.Cuerpo ?? string.Empty,
+                        Fecha = correo.FechaRecibido,
+                    };
+            }
+        }
+
+        /// <summary>
+        /// Clase para representar los Borradores
+        /// </summary>
+        public class BorradorVM
+        {
+            public int RespuestaId { get; set; }
+            public string NombreUsuario { get; set; } = string.Empty;
+            public string Remitente { get; set; } = string.Empty;
+            public List<string> Destinatarios { get; set; } = new List<string>();
+            public int CorreoId { get; set; }
+            public CorreoVM Correo { get; set; }
+            public string Asunto { get; set; } = string.Empty;
+            public string Cuerpo { get; set; } = string.Empty;
+            public string CuerpoHTML { get; set; } = string.Empty;
+            public bool Borrador { get; set; }
+            public DateTime Fecha { get; set; }
+            public List<Adjunto> Adjuntos { get; set; }
+            public bool Seleccionado { get; set; }
+            public bool EsEliminado { get; set; }
+
+            /// <summary>
+            /// Conversor explicito de RespuestaCore a RespuestaVM
+            /// </summary>
+            /// <param name="respuesta">respuesta a convertir</param>
+            public static explicit operator BorradorVM(Respuesta respuesta)
+            {
+                var correoId = respuesta.CorreoId ?? -1;
+                var correo = repositoryManager.CorreoRepository.GetById(correoId);
+
+                return new BorradorVM
+                    {
+                        RespuestaId = respuesta.RespuestaId,
+                        NombreUsuario = respuesta.NombreDestinatario,
+                        CorreoId = respuesta?.CorreoId ?? -1,
+                        Remitente = respuesta.Remitente,
+                        EsEliminado = respuesta.EsEliminado,
+                        Destinatarios = respuesta.Destinatarios,
+                        Asunto = respuesta.Asunto ?? string.Empty,
+                        Cuerpo = respuesta.Cuerpo ?? string.Empty,
+                        CuerpoHTML = respuesta.CuerpoHTML ?? string.Empty,
+                        Fecha = respuesta.FechaProcesado,
+                        Borrador = respuesta.Borrador,
+                        Adjuntos = respuesta.Adjuntos,
+                    };
+            }
+
+            /// Metodo para equiparar los dos tipos de seleccion
+            /// </summary>
+            /// <param name="obj"></param>
+            /// <returns></returns>
+            public override bool Equals(object obj)
+            {
+                if (obj is BorradorVM other)
+                {
+                    return this.RespuestaId == other.RespuestaId;
+                }
+                return false;
+            }
+
+            /// <summary>
+            /// Metodo para equiparar los dos tipos de seleccion
+            /// </summary>
+            /// <returns></returns>
+            public override int GetHashCode()
+            {
+                return RespuestaId.GetHashCode();
+            }
+        }
+
+        public override void UpdateModel(OpResul dataResul)
+        {
+            // Se cargan todas las respuestas y se filtran aquellas marcadas como borrador.
+            var respuestas = ((List<Respuesta>)GetData("Correo_GetRespuestas"))
+                            .Where(r => r.Borrador == true && r.EsEliminado == false)
+                            .OrderByDescending(c => c.FechaEnviado)
+                            .ToList();
+
+            Borradores.Clear();
+            BorradoresPaged.Clear();
+
+            var contactos = ((List<Contacto>)GetData("Correo_GetContactos"))
+                .ToList();
+
+            foreach (var respuesta in respuestas)
+            {
+                // Aquí convertimos la respuesta a un BorradorVM. Podrías reutilizar la conversión de Respuesta a RespuestaDTO o crear un ViewModel específico.
+                BorradorVM borradorVM = (BorradorVM)respuesta;
+                if (respuesta.Destinatarios.Count > 1)
+                {
+                    borradorVM.NombreUsuario = respuesta.Destinatarios.Count + " Destinatarios";
+                }
+                else
+                {
+                    Contacto contacto = contactos.Where(c => c.Email == respuesta.Remitente).FirstOrDefault();
+                    if (contacto != null)
+                    {
+                        borradorVM.NombreUsuario = contacto.Nombre.ToString();
+                    }
+                }
+
+                Borradores.Add(borradorVM);
+
+                if (!BorradoresPaged.Contains(borradorVM))
+                {
+                    BorradoresPaged.Add(borradorVM);
+                }
+            }
+
+            OnUpdateView?.Invoke();
+        }
+    }
+
+    #endregion
+
+    #region PAGINACION
+
+    /// <summary>
+    /// Cambia la pagina de paginacion
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnPageChanged(Syncfusion.Blazor.Navigations.PageChangedEventArgs args)
+    {
+        CurrentPage = args.CurrentPage;
+        ApplyPagination();
+    }
+
+    /// <summary>
+    /// Metodo que aplica la busqueda y la paginacion
+    /// </summary>
+    private void ApplyPagination()
+    {
+        int startIndex = (CurrentPage - 1) * PageSize;
+
+        var filtered = string.IsNullOrEmpty(searchText)
+            ? bandejaBorradores.Borradores
+                .Where(c => c.Borrador && !c.EsEliminado)
+                .OrderByDescending(c => c.Fecha)
+                .ToList()
+            : bandejaBorradores.Borradores
+                .Where(b =>
+                    b.Borrador &&
+                    !b.EsEliminado &&
+                    (
+                        b.Asunto.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                        b.Cuerpo.Contains(searchText, StringComparison.OrdinalIgnoreCase)
+                    ))
+                .OrderByDescending(c => c.Fecha)
+                .ToList();
+
+        bandejaBorradores.BorradoresPaged = filtered.Skip(startIndex)
+                                            // .Take(PageSize)
+                                            .ToList();
+    }
+
+    #endregion
+
+    #region SELECCION
+
+    /// <summary>
+    /// Metodo que alterna la seleccion de un correo
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="forzarValor"></param>
+    private void ToggleSeleccion(BandejaBorradoresVM.BorradorVM borrador, bool? forzarValor = null)
+    {
+        bool nuevoEstado = forzarValor ?? !borrador.Seleccionado;
+        borrador.Seleccionado = nuevoEstado;
+
+        if (nuevoEstado)
+        {
+            if (!bandejaBorradores.SelectedBorradores.Contains(borrador))
+                bandejaBorradores.SelectedBorradores.Add(borrador);
+        }
+        else
+        {
+            bandejaBorradores.SelectedBorradores.Remove(borrador);
+        }
+
+        bandejaBorradores.SelectedBorrador = (bandejaBorradores.SelectedBorradores.Count == 1)
+                                              ? bandejaBorradores.SelectedBorradores.First()
+                                              : null;
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se selecciona una fila
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowSelected(RowSelectEventArgs<BandejaBorradoresVM.BorradorVM> args)
+    {
+        if (editando) return;
+        if (!args.IsCtrlPressed && !args.IsShiftPressed)
+        {
+            // Desmarcar todos los seleccionados
+            foreach (var c in bandejaBorradores.SelectedBorradores)
+            {
+                c.Seleccionado = false;
+            }
+            bandejaBorradores.SelectedBorradores.Clear();
+            ToggleSeleccion(args.Data, true); // Selecciona el nuevo
+            bandejaBorradores.SelectedBorrador = args.Data; // Asegúrate de asignar correctamente la respuesta seleccionada
+        }
+        else if (args.IsCtrlPressed)
+        {
+            ToggleSeleccion(args.Data); // Alternar la selección
+        }
+        else if (args.IsShiftPressed && bandejaBorradores.SelectedBorradores.Any())
+        {
+            var allRows = bandejaBorradores.BorradoresPaged.ToList();
+            var lastSelected = bandejaBorradores.SelectedBorradores.Last();
+            int start = allRows.IndexOf(lastSelected);
+            int end = allRows.IndexOf(args.Data);
+            if (start > end) (start, end) = (end, start);
+            for (int i = start; i <= end; i++)
+            {
+                ToggleSeleccion(allRows[i], true); // Seleccionar en rango
+            }
+        }
+
+        StateHasChanged(); // Refrescar la vista
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se cambia el estado del checkbox
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="e"></param>
+    private void OnCheckboxChanged(BandejaBorradoresVM.BorradorVM borrador, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        if (editando) return;
+        bool isChecked = Convert.ToBoolean(e.Value);
+        ToggleSeleccion(borrador, isChecked);
+    }
+
+    /// <summary>
+    /// Devuelve true si el correo está seleccionado
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <returns></returns>
+    private bool IsSelected(BandejaBorradoresVM.BorradorVM borrador)
+    {
+        return borrador.Seleccionado;
+    }
+
+    /// <summary>
+    /// Se llama cuando se deslecciona una row
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowDeselected(RowDeselectEventArgs<BandejaBorradoresVM.BorradorVM> args)
+    {
+        if (editando) return;
+        ToggleSeleccion(args.Data, false);
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region ADJUNTOS
+
+    /// <summary>
+    /// Permite adjuntar archivos al Correo
+    /// </summary>
+    /// <returns></returns>
+    private async Task PickFiles()
+    {
+        try
+        {
+            var picks = await FilePicker.PickMultipleAsync();
+            if (picks == null) return;
+
+            foreach (var fp in picks)
+            {
+                using var stream = await fp.OpenReadAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                ms.Position = 0;
+
+                var (Success, FileName, Message) =
+                  await sampleDataService.SaveFilesAsync(new[] { ms }, new[] { fp.FileName });
+
+                if (Success)
+                {
+                    uploadedFilePaths.Add(FileName);
+                    await ShowToast($"'{FileName}' subido.");
+                }
+                else
+                {
+                    await ShowToast(Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al seleccionar: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Permite eliminar un archivo de la lista de adjuntos
+    /// </summary>
+    /// <param name="name"></param>
+    /// <returns></returns>
+    private async Task RemoveFile(string name)
+    {
+        if (sampleDataService.RemoveFile(name, out var msg))
+        {
+            uploadedFilePaths.Remove(name);
+            await ShowToast($"'{name}' eliminado.");
+        }
+        else
+        {
+            await ShowToast(msg);
+        }
+    }
+
+    /// <summary>
+    /// Permite Guardar un archivo en el dispositivo
+    /// </summary>
+    /// <param name="adjunto"></param>
+    /// <returns></returns>
+    private async Task DescargarAdjunto(Adjunto adjunto)
+    {
+        try
+        {
+            using var stream = File.OpenRead(adjunto.Ruta);
+
+            // Usamos la implementación por defecto, sin inyección
+            var result = await FileSaver.Default.SaveAsync(
+                adjunto.Nombre,  // nombre sugerido
+                stream,          // contenido
+                cancellationToken: CancellationToken.None
+            );
+
+            if (result.IsSuccessful)
+                await ShowToast($"¡Archivo guardado!");
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al guardar: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Se le asigna un icono distinto a cada tipo de archivo
+    /// </summary>
+    /// <param name="fileName"></param>
+    /// <returns></returns>
+    private string GetFileIcon(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "bi bi-filetype-pdf",      // PDF
+            ".doc" => "bi bi-filetype-doc",      // Word
+            ".docx" => "bi bi-filetype-doc",      // Word
+            ".xls" => "bi bi-filetype-xls",      // Excel
+            ".xlsx" => "bi bi-filetype-xls",      // Excel
+            ".ppt" => "bi bi-filetype-ppt",      // PowerPoint
+            ".pptx" => "bi bi-filetype-ppt",      // PowerPoint
+            ".zip" => "bi bi-file-earmark-zip",  // ZIP
+            ".jpg" => "bi bi-filetype-jpg",      // JPG
+            ".jpeg" => "bi bi-filetype-jpg",      // JPG
+            ".png" => "bi bi-filetype-png",      // PNG
+            ".gif" => "bi bi-filetype-gif",      // GIF
+            _ => "bi bi-file-earmark"       // genérico
+        };
+    }
+
+    /// <summary>
+    /// Se le asigna un color distinto a cada icono de un tipo de archivo
+    /// </summary>
+    /// <param name="fileName"></param>
+    /// <returns></returns>
+    private string GetFileColorClass(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "color:#bf4040;",    // rojo
+            ".doc" => "color:#4083bf;",    // azul
+            ".docx" => "color:#4054bf;",    // azul oscuro
+            ".xls" => "color:#5eae3e;",    // verde
+            ".xlsx" => "color:#3eae48;",    // verde oscuro
+            ".ppt" => "color:#c77e30;",    // naranja
+            ".pptx" => "color:#af712e;",    // naranja oscuro
+            ".zip" => "color:#6e4790;",    // gris
+            ".jpg" => "color:#3a8dac;",    // turquesa
+            ".jpeg" => "color:#3a8dac;",    // turquesa
+            ".png" => "color:#3a8dac;",    // turquesa
+            ".gif" => "color:#3aac61;",    // verde claro
+            _ => "color:#ac9f3a;"     // amarillo
+        };
+    }
+
+    /// <summary>
+    /// Quita un adjunto existente de la respuesta seleccionada
+    /// </summary>
+    private void DeleteAttachment(Adjunto adj)
+    {
+        if (bandejaBorradores.SelectedBorrador?.Adjuntos?.Remove(adj) == true)
+        {
+            StateHasChanged();
+        }
+    }
+
+    #endregion
+
+    #region EDITAR CORREOS
+
+    /// <summary>
+    /// Metodo que activa el Modo Edicion
+    /// </summary>
+    private void OnEditarClick()
+    {
+        editedAsunto = bandejaBorradores.SelectedBorrador.Asunto;
+        originalCuerpo = bandejaBorradores.SelectedBorrador.Cuerpo;
+        editedDestinatariosList = new List<string>(bandejaBorradores.SelectedBorrador.Destinatarios);
+        editando = true;
+    }
+
+    /// <summary>
+    /// Metodo que Sobrescribe el Cuerpo de una Respuesta
+    /// </summary>
+    /// <returns></returns>
+    private async Task OnGuardarClick()
+    {
+        string nuevoTexto = await editedText.GetXhtmlAsync();
+        bandejaBorradores.SetData("Respuesta_RespuestaCuerpo", nuevoTexto, bandejaBorradores.SelectedBorrador.RespuestaId);
+        bandejaBorradores.SetData("Respuesta_RespuestaDestinatarios", editedDestinatariosList, bandejaBorradores.SelectedBorrador.RespuestaId);
+        bandejaBorradores.SetData("Respuesta_RespuestaAsunto", editedAsunto, bandejaBorradores.SelectedBorrador.RespuestaId);
+
+        try
+        {
+            var respuestas = (List<Respuesta>)bandejaBorradores.GetData("Correo_GetRespuestas");
+
+            Respuesta respuesta = respuestas.FirstOrDefault(c => c.RespuestaId == bandejaBorradores.SelectedBorrador.RespuestaId); //Intento obtener el contacto cuyo Email es el escrito
+
+            //Tiene que existir porque si está en borradores, está en respuestas
+            bandejaBorradores.Action("Respuesta_AdjuntarArchivo", respuesta, uploadedFilePaths);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error al adjuntar archivo: " + ex.Message);
+        }
+
+        uploadedFilePaths.Clear();
+        await ShowToast("¡Correo Guardado!");
+        editando = false;
+    }
+
+    /// <summary>
+    /// Metodo que Cancela el Modo Edicion
+    /// </summary>
+    private void OnCancelarEdicion()
+    {
+        editando = false;
+        bandejaBorradores.SelectedBorrador.Cuerpo = originalCuerpo;
+    }
+
+    #endregion
+
+    #region ENVIAR CORREOS
+
+    /// <summary>
+    /// Metodo que envia los correos
+    /// </summary>
+    /// <returns></returns>
+    private async Task OnEnviarClick()
+    {
+        try
+        {
+            var respuestas = bandejaBorradores.SelectedBorradores.Count > 1
+                ? bandejaBorradores.SelectedBorradores.ToList() // Hacemos copia
+                : (bandejaBorradores.SelectedBorrador != null
+                    ? new List<BandejaBorradoresVM.BorradorVM> { bandejaBorradores.SelectedBorrador }
+                    : new List<BandejaBorradoresVM.BorradorVM>());
+
+            if (!respuestas.Any())
+            {
+                await ShowToast("No hay correos seleccionados.");
+                return;
+            }
+
+            var respuestasCore = (List<Respuesta>)bandejaBorradores.GetData("Correo_GetRespuestas");
+            bool todoCorrecto = true;
+
+            foreach (var borradorVM in respuestas)
+            {
+                var respuesta = respuestasCore.FirstOrDefault(r => r.RespuestaId == borradorVM.RespuestaId);
+                if (respuesta is null)
+                    continue;
+
+                bandejaBorradores.SetData("Respuesta_RespuestaBorrador", false, respuesta.RespuestaId);
+
+                var resultTask = bandejaBorradores.Action("Respuesta_EnviarRespuesta", respuesta);
+                if (resultTask is Task<object> taskObj)
+                {
+                    var resultObj = await taskObj;
+                    if (resultObj is bool ok && !ok)
+                    {
+                        todoCorrecto = false;
+                    }
+                }
+                else
+                {
+                    todoCorrecto = false;
+                }
+            }
+
+            if (todoCorrecto)
+            {
+                await ShowToast(respuestas.Count > 1 ? "¡Correos enviados!" : "¡Correo enviado!");
+            }
+            else
+            {
+                await ShowToast("Uno o más correos no se pudieron enviar.");
+            }
+
+            bandejaBorradores.SelectedBorradores.Clear();
+            bandejaBorradores.SelectedBorrador = null;
+            bandejaBorradores.UpdateModel(OpResul.Range);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error inesperado al enviar: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region ELIMINAR CORREOS
+
+    /// <summary>
+    /// Elimina un correo selecionado
+    /// </summary>
+    /// <param name="correo"></param>
+    private async Task EliminarCorreo()
+    {
+        bool todoCorrecto = true;
+
+        try
+        {
+            if (bandejaBorradores.SelectedBorradores.Count > 1)
+            {
+                var borradoresAEliminar = bandejaBorradores.SelectedBorradores.ToList();
+
+                foreach (var borrador in borradoresAEliminar)
+                {
+                    var resultTask = bandejaBorradores.Action("Respuesta_EliminarRespuesta", borrador.RespuestaId, [null]);
+
+                    if (resultTask is Task<object> taskObj)
+                    {
+                        var result = await taskObj;
+                        if (result is bool ok && !ok)
+                        {
+                            todoCorrecto = false;
+                        }
+                    }
+                    else
+                    {
+                        todoCorrecto = false;
+                    }
+                }
+
+                await ShowToast("¡Correos Borrados!");
+                bandejaBorradores.SelectedBorradores.Clear();
+            }
+            else if (bandejaBorradores.SelectedBorrador != null)
+            {
+                var resultTask = bandejaBorradores.Action("Respuesta_EliminarRespuesta", bandejaBorradores.SelectedBorrador.RespuestaId, [null]);
+
+                if (resultTask is Task<object> taskObj)
+                {
+                    var result = await taskObj;
+                    if (result is bool ok && !ok)
+                    {
+                        todoCorrecto = false;
+                    }
+                }
+                else
+                {
+                    todoCorrecto = false;
+                }
+
+                await ShowToast("¡Correo Borrado!");
+                bandejaBorradores.SelectedBorradores.Clear();
+                bandejaBorradores.SelectedBorrador = null;
+            }
+
+            if (!todoCorrecto)
+            {
+                await ShowToast("¡Error al borrar el Correo!");
+            }
+
+            ApplyPagination();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Excepción al borrar: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region MEJORAS
+
+    /// <summary>
+    /// Maneja el evento de tecla en el textbox de destinatario.
+    /// - Si se presiona "Enter" y el campo no está vacío, añade el email a la lista de destinatarios y se muestra el chip.
+    /// - Si se presiona "Backspace" y el campo está vacío, se quita el último email de la lista para poder editarlo.
+    /// </summary>
+    private async Task OnKeyDownDestinatario(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(nuevoDestinatario))
+        {
+            // Agrega el destinatario y limpia el campo
+            editedDestinatariosList.Add(nuevoDestinatario.Trim());
+            nuevoDestinatario = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Elimina un destinatario de la lista al hacer clic en el botón de borrar del chip.
+    /// </summary>
+    /// <param name="email">El email a quitar</param>
+    private void QuitarDestinatario(string email)
+    {
+        if (editedDestinatariosList.Contains(email))
+        {
+            editedDestinatariosList.Remove(email);
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Metodo que elimina las etiquetas HTML de un string
+    /// </summary>
+    /// <param name="input"></param>
+    /// <returns></returns>
+    private string RemoveHtmlTags(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+
+        // Decodifica primero las entidades HTML
+        string decoded = System.Net.WebUtility.HtmlDecode(input);
+
+        // Elimina etiquetas HTML con Regex
+        var cleaned = Regex.Replace(decoded, "<.*?>", string.Empty);
+        return cleaned.Trim();
+    }
+
+    /// <summary>
+    /// Metodo que alterna entre mostrar el Correo Original y el Correo Respuesta.
+    /// </summary>
+    private void ToggleView()
+    {
+        showOriginal = !showOriginal;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Crea un popup por pantalla
+    /// </summary>
+    /// <param name="text"></param>
+    /// <returns></returns>
+    private async Task ShowToast(string text)
+    {
+        await toastObj.ShowAsync(new ToastModel
+            {
+                Content = text,
+                CssClass = "custom-toast",
+                Timeout = 3000
+            });
+    }
+
+    #endregion
+
+}

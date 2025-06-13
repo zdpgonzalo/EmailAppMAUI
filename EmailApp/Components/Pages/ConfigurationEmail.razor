@@ -1,0 +1,240 @@
+﻿@page "/configurationEmail"
+
+@using MailAppMAUI.Config
+@using MailAppMAUI.Controladores
+
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+
+@using Syncfusion.Blazor.Notifications
+
+@using System.ComponentModel.DataAnnotations
+@using System
+
+@inject IJSRuntime JSRuntime
+@inject GesLogin _gesLogin
+
+<SfToast @ref="toastObj" Timeout="5000">
+    <ToastPosition X="Center" Y="Bottom"></ToastPosition>
+</SfToast>
+
+<div class="login-wrapper">
+    <h1 class="register-title">Configuración de Correo</h1>
+    <div class="register-container">
+        <EditForm Model="@config" OnValidSubmit="GuardarConfiguracion">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-group mb-3">
+                <input type="text" class="form-control" placeholder="Correo electrónico" @bind-value="config.Email">
+            </div>
+
+            <div class="form-group mb-3 position-relative">
+                <input type="@((mostrarPassword ? "text" : "password"))"
+                       class="form-control pe-5"
+                       placeholder="Contraseña del correo"
+                       @bind-value="config.EmailPassword" />
+
+                <!-- Botón para mostrar/ocultar contraseña -->
+                <button class="show-btn position-absolute top-0 end-0"
+                        @onclick="TogglePasswordVisibility">
+                    @(mostrarPassword ? "Ocultar" : "Mostrar")
+                </button>
+
+                <!-- Icono de ayuda con tooltip -->
+                <span class="position-absolute top-0 end-0 mt-2 me-2" data-bs-toggle="tooltip"
+                      title="Por seguridad, necesita crear desde el mail que desea registrar una contraseña para aplicaciones de terceros.
+                Esa contraseña es la que debe introducir.">
+                    <i class="bi bi-question-circle-fill text-muted" style="cursor: pointer;"></i>
+                </span>
+            </div>
+
+
+            <div class="form-group mb-3">
+                <input type="text" class="form-control" placeholder="Conexión IMAP" @bind-value="config.ImapConexion">
+            </div>
+
+            <div class="form-group mb-3">
+                <!-- Puerto IMAP sin el atributo 'value', usando solo @bind-value -->
+                <input type="number" class="form-control" placeholder="Puerto IMAP" @bind-value="config.ImapPort">
+            </div>
+
+            <div class="form-group mb-3">
+                <input type="text" class="form-control" placeholder="Conexión SMTP" @bind-value="config.SmtpConexion">
+            </div>
+
+            <div class="form-group mb-4">
+                <!-- Puerto SMTP sin el atributo 'value', usando solo @bind-value -->
+                <input type="number" class="form-control" placeholder="Puerto SMTP" @bind-value="config.SmtpPort">
+            </div>
+
+            <div class="d-grid gap-2">
+                <button type="submit" class="signin">Guardar Configuración</button>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+            new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+    });
+</script>
+
+
+@code {
+
+    #region COMPONENTES DE LA VISTA
+
+    // Variables básicas
+
+    private ConfigurationEmailVM confEmailVM;
+    private SfToast toastObj;
+    private bool mostrarPassword = false;
+
+    // Configuracion
+
+    static Configuration Conf { get; set; }
+    private ConfigModel config = new()
+        {
+            ImapPort = 993, // Valor predeterminado para IMAP
+            SmtpPort = 587,  // Valor predeterminado para SMTP
+            Email = "",  // Valor predeterminado para SMTP
+            EmailPassword = "",  // Valor predeterminado para SMTP
+            ImapConexion = "",  // Valor predeterminado para SMTP
+            SmtpConexion = "",  // Valor predeterminado para SMTP
+        };
+
+    // Métodos Básicos
+
+    protected override void OnInitialized()
+    {
+        confEmailVM = new(_gesLogin);
+
+        if ((Conf = Configuration.Config) == null)
+        {
+            Conf = new Configuration();
+        }
+    }
+
+    #endregion
+
+    #region VIEWMODEL
+
+    public class ConfigurationEmailVM : VModelBase
+    {
+        public ConfigurationEmailVM(IAction gesLogin) : base(gesLogin)
+        {
+
+        }
+    }
+
+    #endregion
+
+    #region CAMBIAR CONFIGURACION
+
+    /// <summary>
+    /// Permite guardar la configuración del correo electrónico
+    /// </summary>
+    /// <returns></returns>
+    private async Task GuardarConfiguracion()
+    {
+        // Copias los valores del formulario a tu configuración
+        Conf.User.Email = config.Email;
+        Conf.User.Password = config.EmailPassword;
+        Conf.User.ImapConexion = config.ImapConexion;
+        Conf.User.ImapPort = config.ImapPort;
+        Conf.User.SmtpConexion = config.SmtpConexion;
+        Conf.User.SmtpPort = config.SmtpPort;
+        Conf.User.AccessToken = "NoAccessToken";
+
+        try
+        {
+            //var ok = await _gesLogin.Action("Usuario_ReadEmails");
+            var ok = await _gesLogin.Action("Usuario_CheckIfReal");
+            bool okBool = (bool)ok;
+
+            if (okBool) //Sea cual sea, cambia de cuenta haciendo esto
+            {
+                // Guarda la configuracion (lo que haya actualmente en el Conf)
+                BaseConfig.SaveConfig();
+
+                // Se conecta y ejecuta servicios
+                await _gesLogin.Action("Usuario_ReadEmails");
+
+                await ShowToast("¡Configuracion Guardada!");
+
+            }
+            else
+            {
+                await ShowToast("¡Email o Contraseña Incorrectos!");
+            }
+        }
+        catch (Exception ex)
+        {
+            
+        }
+    }
+
+    /// <summary>
+    /// Comprueba que los datos introducidos son válidos
+    /// </summary>
+    public class ConfigModel
+    {
+        [Required(ErrorMessage = "El correo electrónico es obligatorio")]
+        [EmailAddress(ErrorMessage = "Formato de correo no válido")]
+        public string Email { get; set; }
+
+        [Required(ErrorMessage = "La contraseña del correo es obligatoria")]
+        public string EmailPassword { get; set; }
+
+        [Required(ErrorMessage = "La conexión IMAP es obligatoria")]
+        public string ImapConexion { get; set; }
+
+        [Required(ErrorMessage = "El puerto IMAP es obligatorio")]
+        [Range(1, 65535, ErrorMessage = "Puerto IMAP debe estar entre 1 y 65535")]
+        public int ImapPort { get; set; }
+
+        [Required(ErrorMessage = "La conexión SMTP es obligatoria")]
+        public string SmtpConexion { get; set; }
+
+        [Required(ErrorMessage = "El puerto SMTP es obligatorio")]
+        [Range(1, 65535, ErrorMessage = "Puerto SMTP debe estar entre 1 y 65535")]
+        public int SmtpPort { get; set; }
+    }
+
+    #endregion
+
+    #region MEJORAS
+
+    /// <summary>
+    /// Alterna entre mostrar y ocultar la contraseña
+    /// </summary>
+    private void TogglePasswordVisibility()
+    {
+        mostrarPassword = !mostrarPassword;
+    }
+
+    /// <summary>
+    /// Crea un popup por pantalla
+    /// </summary>
+    /// <param name="text"></param>
+    /// <returns></returns>
+    private async Task ShowToast(string text)
+    {
+        await toastObj.ShowAsync(new ToastModel
+            {
+                Content = text,
+                CssClass = "custom-toast",
+                Timeout = 3000
+            });
+    }
+
+    #endregion
+
+}
+}

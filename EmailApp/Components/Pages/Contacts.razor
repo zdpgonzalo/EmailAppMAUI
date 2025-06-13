@@ -1,0 +1,784 @@
+﻿@page "/contacts"
+
+@using EmailApp.UseCases.Services
+@using MailAppMAUI.Config
+@using MailAppMAUI.General
+@using MailAppMAUI.Core
+@using MailAppMAUI.Controladores
+@using MailAppMAUI.UseCases
+@using MailAppMAUI.Repositorios
+
+@using MimeKit
+
+@using Syncfusion.Blazor
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Data
+@using Syncfusion.Blazor.Navigations
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Buttons
+@using Syncfusion.Blazor.RichTextEditor
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Notifications
+
+@using System.Text.RegularExpressions
+
+@inject MailAppMAUI.Repositorios.RepositoryManager repositoryManager
+@inject GesCorreos _gesCorreos
+@implements IDisposable
+
+<SfToast @ref="toastObj" Timeout="5000">
+    <ToastPosition X="Center" Y="Bottom"></ToastPosition>
+</SfToast>
+
+<!-- Contenedor principal -->
+<div class="page-container">
+
+    <!-- Contenedor del grid y la paginación -->
+    <div class="grid-pag-container">
+        <!-- Tabla -->
+        <div class="grid-card">
+            <SfGrid @ref="Grid" DataSource="@contactos.ContactsPaged" AllowSelection="@(!editando)" EnableAdaptiveUI="true" AllowSorting="true" SelectionSettings="@selectionSettings">
+                <GridEvents RowSelected="OnRowSelected" RowDeselected="OnRowDeselected" TValue="ContactsVM.Contact"></GridEvents>
+                <GridColumns>
+                    <GridColumn Width="6%" TextAlign="TextAlign.Center">
+                        <Template Context="contact">
+                            @{
+                                var contactVM = (ContactsVM.Contact)contact;
+                            }
+                            <input type="checkbox"
+                                   @onclick:stopPropagation="true"
+                                   checked="@IsSelected(contactVM)"
+                                   disabled="@editando"
+                                   @onchange="@(e => OnCheckboxChanged(contactVM, e))" />
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Field="Nombre" HeaderText="Nombre" Width="15%" TextAlign="TextAlign.Left" />
+                    <GridColumn Field="Correo" HeaderText="Correo" Width="25%" TextAlign="TextAlign.Left" />
+                    <GridColumn Field="Telefono" HeaderText="Telefono" Width="17%" TextAlign="TextAlign.Center" />
+                    <GridColumn Field="Tipo" HeaderText="Tipo" Width="15%" TextAlign="TextAlign.Center" />
+                    <GridColumn Field="Descripcion" HeaderText="Descripcion" Width="25%" TextAlign="TextAlign.Left">
+                        <Template Context="contact">
+                            @RemoveHtmlTags((contact as ContactsVM.Contact).Descripcion)
+                        </Template>
+                    </GridColumn>
+                    <GridColumn Width="9%" TextAlign="TextAlign.Center">
+                        <Template Context="contact">
+                            <div class="delete-button-container" style="@(contactos.SelectedContact == contact ? "visibility: visible;" : "visibility: hidden;")">
+                                <button class="btn custom-delete-btn" @onclick="EliminarContacto">
+                                    <i class="bi bi-backspace-fill no-margin"></i>
+                                </button>
+                            </div>
+                        </Template>
+                    </GridColumn>
+                </GridColumns>
+            </SfGrid>
+        </div>
+    </div>
+
+    <!-- Panel de detalles del contacto -->
+    <!-- Panel de detalles del contacto -->
+    @if (addingNewContact || contactos.SelectedContacts.Count > 0)
+    {
+        <div class="detail-card @(contactos.SelectedContacts.Count > 1 ? "centered-card" : "")">
+            @if (addingNewContact)
+            {
+                <div class="new-contact">
+
+                    <div class="correo-detalle-botones">
+                        <SfButton OnClick="GuardarNuevoContacto" CssClass="mail-btn">Guardar</SfButton>
+                        <SfButton OnClick="CancelarNuevoContacto" CssClass="mail-btn">Cancelar</SfButton>
+                    </div>
+
+                    <p></p>
+
+                    <div class="field-row">
+                        <span class="contact-subtext" style="margin-right:10px; display:inline-block; vertical-align:middle;">
+                            Nombre:
+                        </span>
+                        <div class="contact-input" style="display:inline-block; vertical-align:middle; width:100%;">
+                            <SfTextBox @bind-Value="newNombre" Placeholder="Nombre" />
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <span class="contact-subtext" style="margin-right:10px; display:inline-block;">Correo:</span>
+                        <div class="contact-input" style="display:inline-block; width:100%;">
+                            <SfTextBox @bind-Value="newCorreo" Placeholder="Correo" />
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <span class="contact-subtext" style="margin-right:10px; display:inline-block;">Teléfono:</span>
+                        <div class="contact-input" style="display:inline-block; width:100%;">
+                            <SfTextBox @bind-Value="newTelefono" Placeholder="Teléfono" />
+                        </div>
+                    </div>
+
+                    <div class="field-row">
+                        <span class="contact-subtext" style="margin-right:10px; display:inline-block;">Tipo:</span>
+                        <div class="contact-input" style="display:inline-block; width:100%;">
+                            <SfDropDownList DataSource="@contactTypes" @bind-Value="newTipo" Placeholder="Tipo" />
+                        </div>
+                    </div>
+
+                    <SfRichTextEditor @ref="newDescEditor" Height="200px">
+                        <p></p>
+                    </SfRichTextEditor>
+
+                    <p></p>
+
+                </div>
+            }
+            else
+            {
+                @if (contactos.SelectedContacts.Count == 1 && contactos.SelectedContacts != null)
+                {
+                    <div class="correo-detalle">
+                        @if (editando)
+                        {
+                            <div class="correo-detalle-botones">
+                                <SfButton OnClick="OnGuardarClick" CssClass="mail-btn">Guardar</SfButton>
+                                <SfButton OnClick="OnCancelarEdicion" CssClass="mail-btn">Cancelar</SfButton>
+                            </div>
+
+                            <p></p>
+
+                            <div class="field-row">
+                                <span class="contact-subtext" style=" margin-right:10px; display:inline-block; vertical-align:middle;">
+                                    Nombre:
+                                </span>
+                                <div class="contact-input" style="display:inline-block; vertical-align:middle; width:100%;">
+                                    <SfTextBox @bind-Value="editedNombre" Placeholder="Editar nombre" />
+                                </div>
+                            </div>
+
+                            <div class="field-row">
+                                <span class="contact-subtext" style="margin-right:10px; display:inline-block;">Correo:</span>
+                                <div class="contact-input" style="display:inline-block; width:100%;">
+                                    <SfTextBox @bind-Value="editedCorreo" Placeholder="Editar correo" />
+                                </div>
+                            </div>
+
+                            <div class="field-row">
+                                <span class="contact-subtext" style="margin-right:10px; display:inline-block;">Teléfono:</span>
+                                <div class="contact-input" style="display:inline-block; width:100%;">
+                                    <SfTextBox @bind-Value="editedTelefono" Placeholder="Editar teléfono" />
+                                </div>
+                            </div>
+
+                            <div class="field-row">
+                                <span class="contact-subtext" style="margin-right:10px; display:inline-block;">Tipo:</span>
+                                <div class="contact-input" style="display:inline-block; width:100%;">
+                                    <SfDropDownList DataSource="@contactTypes" @bind-Value="editedTipo" Placeholder="Seleccione tipo" />
+                                </div>
+                            </div>
+
+                            <SfRichTextEditor @ref="editedText" Height="300px">
+                                <p>@(new MarkupString((contactos.SelectedContact.Descripcion ?? string.Empty).Replace("\n", "<br>")))</p>
+                            </SfRichTextEditor>
+
+                            <p></p>
+                        }
+                        else
+                        {
+                            <div class="correo-detalle-botones">
+                                <SfButton OnClick="OnEditarClick" CssClass="mail-btn">Editar</SfButton>
+                            </div>
+
+                            <span class="contact-name">@contactos.SelectedContact.Nombre</span>
+                            <p></p>
+
+                            <p><span class="contact-subtext">Correo:</span> @contactos.SelectedContact.Correo</p>
+                            <p><span class="contact-subtext">Teléfono:</span> @contactos.SelectedContact.Telefono</p>
+                            <p><span class="contact-subtext">Tipo:</span> @contactos.SelectedContact.Tipo</p>
+                            <p>@(new MarkupString((contactos.SelectedContact.Descripcion ?? string.Empty).Replace("\n", "<br>")))</p>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="centered-content">
+                        <i class="bi bi-envelope-fill big-envelope-icon" style="margin-left: 15px !important;"></i>
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 15px; margin-top: 25px;">
+                            <button class="multiple-btn" @onclick="EliminarContacto">
+                                <i class="bi bi-trash no-margin-icon"></i> Eliminar
+                            </button>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    }
+
+</div>
+
+@code {
+
+    #region COMPONENTES DE LA VISTA
+
+    // Variables básicas
+
+    private SfGrid<ContactsVM.Contact> Grid;
+    private ContactsVM contactos;
+
+    private int PageSize = 10;
+    private int CurrentPage = 1;
+    private string searchText = string.Empty;
+
+    // Edicion de Propiedades del Contacto
+
+    private string editedCorreo;
+    private string editedTelefono;
+    private string editedTipo;
+    private string editedNombre;
+    private List<string> contactTypes = new List<string> { "Formal", "Informal", "Desconocido" };
+    private string originalDescripcion;
+    private SfRichTextEditor editedText = new();
+    private bool editando = false;
+
+    // Creacion de Propiedades del Contacto
+
+    private bool addingNewContact = false;
+    private string newNombre;
+    private string newCorreo;
+    private string newTelefono;
+    private string newTipo;
+    private SfRichTextEditor newDescEditor;
+
+    // Otros
+
+    private SfToast toastObj;
+    [CascadingParameter] public EventCallback<string> OnSearch { get; set; }
+    static Configuration Conf { get; set; }
+    private Syncfusion.Blazor.Grids.GridSelectionSettings selectionSettings = new Syncfusion.Blazor.Grids.GridSelectionSettings
+        {
+            Type = Syncfusion.Blazor.Grids.SelectionType.Multiple,
+            Mode = Syncfusion.Blazor.Grids.SelectionMode.Row
+        };
+
+    // Métodos Básicos
+
+    private void HandleSearch(string query)
+    {
+        Console.WriteLine($"[Entrada] Recibido search: {query}");
+        searchText = query;  // Actualizamos la variable si es necesario
+        ApplyPagination();
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnInitialized()
+    {
+        contactos = new(_gesCorreos);
+        if ((Conf = Configuration.Config) == null)
+        {
+            Conf = new Configuration();
+        }
+        SearchService.OnSearch += HandleSearch;
+        ContactsActionService.OnAddContact += OnAgregarContacto;
+
+        ApplyPagination();
+    }
+
+    public void Dispose()
+    {
+        SearchService.OnSearch -= HandleSearch;
+        ContactsActionService.OnAddContact -= OnAgregarContacto;
+
+    }
+
+    #endregion
+
+    #region VIEWMODEL
+
+    public class ContactsVM : VModelBase
+    {
+        public ContactsVM(IAction gesCorreos) : base(gesCorreos)
+        {
+            UpdateModel(OpResul.Range);
+        }
+
+        public List<Contact> contactsList { get; set; } = new();
+        public List<Contact> ContactsPaged { get; set; } = new();
+        public Contact? SelectedContact { get; set; }
+        public List<Contact> SelectedContacts { get; set; } = new();
+
+        public class Contact
+        {
+            public int ContactoId { get; set; }
+            public string Nombre { get; set; } = string.Empty;
+            public string Correo { get; set; } = string.Empty;
+            public string Tipo { get; set; } = string.Empty;
+            public string Descripcion { get; set; } = string.Empty;
+            public string Telefono { get; set; } = string.Empty;
+            public bool Seleccionado { get; set; }
+
+            /// <summary>
+            /// Conversor explicito de ContactoCore a ContactoVM
+            /// </summary>
+            /// <param name="contacto">contacto a convertir</param>
+            public static explicit operator Contact(Contacto contacto)
+            {
+                return new Contact
+                    {
+                        ContactoId = contacto.ContactoId,
+                        Nombre = contacto.Nombre,
+                        Correo = contacto.Email ?? string.Empty,
+                        Telefono = contacto.Telefono,
+                        Tipo = contacto.Tipo.ToString(),
+                        Descripcion = contacto.Descripcion ?? string.Empty,
+                    };
+            }
+
+            /// <summary>
+            /// Metodo para equiparar los dos tipos de seleccion
+            /// </summary>
+            /// <param name="obj"></param>
+            /// <returns></returns>
+            public override bool Equals(object obj)
+            {
+                if (obj is Contact other)
+                {
+                    return this.ContactoId == other.ContactoId;
+                }
+                return false;
+            }
+
+            /// <summary>
+            /// Metodo para equiparar los dos tipos de seleccion
+            /// </summary>
+            /// <returns></returns>
+            public override int GetHashCode()
+            {
+                return ContactoId.GetHashCode();
+            }
+        }
+
+        /// <summary>
+        /// Añade los correos del repositorio a la lista de correos y a la lista de correos por pagina
+        /// </summary>
+        /// <param name="dataResul"></param>
+        public override void UpdateModel(OpResul dataResul)
+        {
+            var contactos = (List<Contacto>)GetData("Correo_GetContactos", 10);
+
+            contactsList.Clear();
+            foreach (var contacto in contactos)
+            {
+                contactsList.Add((Contact)contacto);
+            }
+        }
+    }
+
+    #endregion
+
+    #region PAGINACIÓN
+
+    /// <summary>
+    /// Metodo que dice que Pagina es la Actual
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnPageChanged(Syncfusion.Blazor.Navigations.PageChangedEventArgs args)
+    {
+        CurrentPage = args.CurrentPage;
+        ApplyPagination();
+    }
+
+    /// <summary>
+    /// Metodo que Aplica la Paginacion
+    /// </summary>
+    private void ApplyPagination()
+    {
+        int startIndex = (CurrentPage - 1) * PageSize;
+        var filteredContacts = string.IsNullOrEmpty(searchText)
+            ? contactos.contactsList
+            : contactos.contactsList.Where(c => c.Nombre.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                                                 c.Correo.Contains(searchText, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        contactos.ContactsPaged = filteredContacts.Skip(startIndex).ToList();
+
+        if (contactos.ContactsPaged.Any())
+        {
+            contactos.SelectedContact = contactos.ContactsPaged.First();
+        }
+        else
+        {
+            contactos.SelectedContact = null;
+        }
+
+        Grid?.Refresh();
+    }
+
+    #endregion
+
+    #region SELECCION
+
+    /// <summary>
+    /// Metodo que alterna la seleccion de un correo
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="forzarValor"></param>
+    private void ToggleSeleccion(ContactsVM.Contact correo, bool? forzarValor = null)
+    {
+        bool nuevoEstado = forzarValor ?? !correo.Seleccionado;
+        correo.Seleccionado = nuevoEstado;
+
+        if (nuevoEstado)
+        {
+            if (!contactos.SelectedContacts.Contains(correo))
+                contactos.SelectedContacts.Add(correo);
+        }
+        else
+        {
+            contactos.SelectedContacts.Remove(correo);
+        }
+
+        contactos.SelectedContact = (contactos.SelectedContacts.Count == 1)
+                                          ? contactos.SelectedContacts.First()
+                                          : null;
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se selecciona una fila
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowSelected(RowSelectEventArgs<ContactsVM.Contact> args)
+    {
+        if (editando) return;
+        if (!args.IsCtrlPressed && !args.IsShiftPressed)
+        {
+            foreach (var c in contactos.SelectedContacts)
+                c.Seleccionado = false;
+
+            contactos.SelectedContacts.Clear();
+
+            ToggleSeleccion(args.Data, true); // Selecciona el nuevo
+
+            return;
+        }
+
+        if (args.IsCtrlPressed)
+        {
+            ToggleSeleccion(args.Data); // alterna
+        }
+        else if (args.IsShiftPressed && contactos.SelectedContacts.Any())
+        {
+            var allRows = contactos.ContactsPaged.ToList();
+            var lastSelected = contactos.SelectedContacts.Last();
+            int start = allRows.IndexOf(lastSelected);
+            int end = allRows.IndexOf(args.Data);
+            if (start > end) (start, end) = (end, start);
+            for (int i = start; i <= end; i++)
+            {
+                ToggleSeleccion(allRows[i], true);
+            }
+        }
+        else
+        {
+            // Selección única
+            foreach (var corr in contactos.SelectedContacts)
+            {
+                corr.Seleccionado = false;
+            }
+            contactos.SelectedContacts.Clear();
+
+            ToggleSeleccion(args.Data, true);
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que se llama cuando se cambia el estado del checkbox
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <param name="e"></param>
+    private void OnCheckboxChanged(ContactsVM.Contact correo, Microsoft.AspNetCore.Components.ChangeEventArgs e)
+    {
+        if (editando) return;
+        bool isChecked = Convert.ToBoolean(e.Value);
+        ToggleSeleccion(correo, isChecked);
+    }
+
+    /// <summary>
+    /// Devuelve true si el correo está seleccionado
+    /// </summary>
+    /// <param name="correo"></param>
+    /// <returns></returns>
+    private bool IsSelected(ContactsVM.Contact correo)
+    {
+        return correo.Seleccionado;
+    }
+
+    /// <summary>
+    /// Se llama cuando se deslecciona una row
+    /// </summary>
+    /// <param name="args"></param>
+    private void OnRowDeselected(RowDeselectEventArgs<ContactsVM.Contact> args)
+    {
+        if (editando) return;
+        ToggleSeleccion(args.Data, false);
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region EDICION DE CONTACTOS
+
+    /// <summary>
+    /// Metodo que activa el Modo Edicion
+    /// </summary>
+    private void OnEditarClick()
+    {
+        editedCorreo = contactos.SelectedContact.Correo;
+        editedTelefono = contactos.SelectedContact.Telefono;
+        editedTipo = contactos.SelectedContact.Tipo;
+        editedNombre = contactos.SelectedContact.Nombre;
+        originalDescripcion = contactos.SelectedContact.Descripcion;
+        editando = true;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Guarda los datos editados de un contacto.
+    /// </summary>
+    /// <returns></returns>
+    /// <remarks>Actualiza correctamente los datos en los correos, pero no en las respuestas, puesto que correos tiene un contacto, y respuestas no. Respuesta deberia tener una lista de Contactos, no una lista de Strings<remarks>
+    private async Task OnGuardarClick()
+    {
+        string nuevoTexto = await editedText.GetXhtmlAsync();
+
+        contactos.SelectedContact.Correo = editedCorreo;
+        contactos.SelectedContact.Telefono = editedTelefono;
+        contactos.SelectedContact.Tipo = editedTipo;
+        contactos.SelectedContact.Nombre = editedNombre;
+        contactos.SelectedContact.Descripcion = nuevoTexto;
+
+        contactos.SetData("Contacto_UpdateCorreo", editedCorreo, contactos.SelectedContact.ContactoId);
+        contactos.SetData("Contacto_UpdateTelefono", editedTelefono, contactos.SelectedContact.ContactoId);
+        contactos.SetData("Contacto_UpdateTipo", editedTipo, contactos.SelectedContact.ContactoId);
+        contactos.SetData("Contacto_UpdateNombre", editedNombre, contactos.SelectedContact.ContactoId);
+        contactos.SetData("Contacto_UpdateDescripcion", nuevoTexto, contactos.SelectedContact.ContactoId);
+
+        editando = false;
+        ShowToast("¡Contacto Guardado!");
+        await Task.Delay(50); // pequeña espera para asegurar cambios
+        ApplyPagination();    // recarga los datos visibles
+        Grid?.Refresh();      // refresca el grid
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Metodo que Cancela el Modo Edicion
+    /// </summary>
+    private void OnCancelarEdicion()
+    {
+        editando = false;
+        contactos.SelectedContact.Descripcion = originalDescripcion;
+        StateHasChanged();
+    }
+    #endregion
+
+    #region CREAR CONTACTOS
+
+    /// <summary>
+    /// Metodo que activa el Modo Agregar Nuevo Contacto
+    /// </summary>
+    private void OnAgregarContacto()
+    {
+        addingNewContact = true;
+        newNombre = string.Empty;
+        newCorreo = string.Empty;
+        newTelefono = string.Empty;
+        newTipo = contactTypes.FirstOrDefault();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Guarda y añade un contacto a la base de datos
+    /// </summary>
+    /// <returns></returns>
+    private async Task GuardarNuevoContacto()
+    {
+        try
+        {
+            string nuevaDescripcion = await newDescEditor.GetXhtmlAsync();
+
+            Usuario usuarioActual = Usuario.CreateUsuario(
+                "test@example.com", "contraseñaDummy", "User", new Plan(PlanType.Gratuito), "Test User"
+            );
+
+            Usuario? miUsuario = repositoryManager.UsuarioRepository.GetById(Conf.User.UserId);
+
+            Contacto nuevoContacto = Contacto.CreateContacto(newCorreo, Conf.User.UserId, newNombre);
+            nuevoContacto.SetTelefono(newTelefono);
+            nuevoContacto.SetTipo(newTipo);
+            nuevoContacto.UpdateDescripcion(nuevaDescripcion);
+
+            var resultTask = contactos.Action("Contacto_GuardarContacto", nuevoContacto);
+
+            if (resultTask is Task<object> taskObj)
+            {
+                var result = await taskObj;
+
+                if (result is bool ok)
+                {
+                    if (ok)
+                    {
+                        await ShowToast("¡Contacto añadido correctamente!");
+                        contactos.UpdateModel(OpResul.Range);
+                        ApplyPagination();
+                        addingNewContact = false;
+                        StateHasChanged();
+                        return;
+                    }
+                    else
+                    {
+                        await ShowToast("No se pudo añadir el contacto. Es posible que el email ya exista.");
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                await ShowToast("Error inesperado al procesar el contacto.");
+            }
+
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al añadir contacto: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Metodo que Cancela el Modo Agregar Nuevo Contacto
+    /// </summary>
+    private void CancelarNuevoContacto()
+    {
+        addingNewContact = false;
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region ELIMINAR CONTACTOS
+
+    /// <summary>
+    /// Se encarga de eliminar uno o varios contactos
+    /// </summary>
+    /// <returns></returns>
+    private async Task EliminarContacto()
+    {
+        try
+        {
+            bool todoCorrecto = true;
+
+            if (contactos.SelectedContacts.Count > 1)
+            {
+                var contactosAEliminar = contactos.SelectedContacts.ToList();
+
+                var resultTask = contactos.Action("Contacto_EliminarListaContactos", contactosAEliminar.Select(c => c.ContactoId).ToList());
+
+                // foreach (var contacto in contactosAEliminar)
+                // {
+                //     var resultTask = contactos.Action("Contacto_EliminarContacto", contacto.ContactoId, [null]);
+                if (resultTask is Task<object> taskObj)
+                {
+                    var result = await taskObj;
+                    if (result is bool ok && !ok)
+                    {
+                        todoCorrecto = false;
+                    }
+                }
+                else
+                {
+                    todoCorrecto = false;
+                }
+                // }
+                if (todoCorrecto)
+                {
+                    await ShowToast("¡Contactos Eliminados!");
+                }
+                contactos.SelectedContacts.Clear();
+            }
+            else if (contactos.SelectedContact != null)
+            {
+                var resultTask = contactos.Action("Contacto_EliminarContacto", contactos.SelectedContact.ContactoId, [null]);
+                if (resultTask is Task<object> taskObj)
+                {
+                    var result = await taskObj;
+                    if (result is bool ok && !ok)
+                    {
+                        todoCorrecto = false;
+                    }
+                }
+                else
+                {
+                    todoCorrecto = false;
+                }
+
+                if (todoCorrecto)
+                {
+                    await ShowToast("¡Contactos Eliminados!");
+                }
+
+                contactos.SelectedContact = null;
+                contactos.SelectedContacts.Clear();
+            }
+
+            if (!todoCorrecto)
+            {
+                await ShowToast("No se pudo eliminar el contacto. El contacto tiene aún correos asociados.");
+            }
+
+            contactos.UpdateModel(OpResul.Range);
+            ApplyPagination();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Excepción al eliminar: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region MEJORAS
+
+    /// <summary>
+    /// Metodo para que en el Grid se muestre el texto bien
+    /// </summary>
+    /// <param name="input"></param>
+    /// <returns></returns>
+    private string RemoveHtmlTags(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+
+        // Decodifica primero las entidades HTML
+        string decoded = System.Net.WebUtility.HtmlDecode(input);
+
+        // Elimina etiquetas HTML con Regex
+        var cleaned = Regex.Replace(decoded, "<.*?>", string.Empty);
+        return cleaned.Trim();
+    }
+
+    /// <summary>
+    /// Crea un popup por pantalla
+    /// </summary>
+    /// <param name="text"></param>
+    /// <returns></returns>
+    private async Task ShowToast(string text)
+    {
+        await toastObj.ShowAsync(new ToastModel
+            {
+                Content = text,
+                CssClass = "custom-toast",
+                Timeout = 3000
+            });
+    }
+
+    #endregion
+
+}

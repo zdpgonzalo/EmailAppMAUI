@@ -1,0 +1,57 @@
+﻿
+<div class="nav-scrollable nav-bar @(IsCollapsed ? "collapsed" : "expanded")">
+    <nav class="flex-column">
+
+        <NavLink class=@($"new-box {(IsCollapsed ? "collapsed" : "expanded")}") href="nuevo-correo" ActiveClass="active-section">
+            <i class="bi bi-pencil-square" style="margin: 2px 11px 10px 10px !important;"></i>
+            <span class="nav-text">
+                Nuevo<br />Correo
+            </span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="entrada" ActiveClass="active-section">
+            <i class="bi bi-inbox"></i>
+            <span class="nav-text">Entrada</span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="salida" ActiveClass="active-section">
+            <i class="bi bi-send"></i>
+            <span class="nav-text">Salida</span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="enviados" ActiveClass="active-section">
+            <i class="bi bi-check-all"></i>
+            <span class="nav-text">Enviados</span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="borradores" ActiveClass="active-section">
+            <i class="bi bi-file-earmark-text"></i>
+            <span class="nav-text">Borradores</span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="destacados" ActiveClass="active-section">
+            <i class="bi bi-star"></i>
+            <span class="nav-text">Destacados</span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="eliminados" ActiveClass="active-section">
+            <i class="bi bi-trash"></i>
+            <span class="nav-text">Papelera</span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="contacts" ActiveClass="active-section">
+            <i class="bi bi-people"></i>
+            <span class="nav-text">Contactos</span>
+        </NavLink>
+
+        <NavLink class=@($"nav-box nav-link {(IsCollapsed ? "collapsed" : "")}") href="configurationEmail" ActiveClass="active-section">
+            <i class="bi bi-gear"></i>
+            <span class="nav-text">Opciones</span>
+        </NavLink>
+    </nav>
+</div>
+
+@code {
+    [Parameter]
+    public bool IsCollapsed { get; set; }
+}

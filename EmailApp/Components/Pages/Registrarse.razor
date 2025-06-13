@@ -1,0 +1,135 @@
+﻿@page "/registrarse"
+@using System
+@using MailAppMAUI.Controladores
+@using MailAppMAUI.Core
+@using MailAppMAUI.UseCases
+@using MailAppMAUI.UseCases.Services
+@using MailAppMAUI.Config
+@using MailAppMAUI.Repositorios
+@using MailAppMAUI.Config
+@using MailAppMAUI.Models
+@using Syncfusion.Blazor
+@using Syncfusion.Blazor.Grids
+@using Microsoft.AspNetCore.Components.Forms
+@using MailAppMAUI.Models
+@using System.Security.Claims
+@implements IDisposable
+@inject GesLogin _gesLogin
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+
+<div class="login-wrapper">
+    <h1 class="register-title">Regístrate</h1>
+    <div class="register-container">
+        <EditForm Model="@user" OnValidSubmit="OnRegisterClick">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-group mb-3">
+                <input type="text" class="form-control" placeholder="Introduce tu Correo" @bind-value="user.Username">
+            </div>
+
+            <div class="form-group mb-3">
+                <input type="password" class="form-control" placeholder="Introduce tu Contraseña" @bind-value="user.Password">
+            </div>
+
+            <div class="form-group mb-4">
+                <input type="password" class="form-control" placeholder="Confirma tu Contraseña" @bind-value="user.ConfirmPassword">
+            </div>
+
+            <div class="d-grid gap-2">
+                <button type="submit" class="signin" @onclick="OnRegisterClick">Registrarse</button>
+            </div>
+
+            <div class="d-grid gap-2">
+                <button type="button" class="signin" @onclick="OnGoogleLogin">Registrarse con Google</button>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private UserModel user = new UserModel();
+
+    private RegistroVM registroVM;
+    bool isRegistered;
+
+    static Configuration Conf { get; set; }
+
+    protected override void OnInitialized()
+    {
+        registroVM = new RegistroVM(_gesLogin);
+        isRegistered = false;
+
+        if ((Conf = Configuration.Config) == null)
+        {
+            Conf = new Configuration();
+        }
+    }
+
+    public void Dispose()
+    {
+        // Aquí podrías limpiar suscripciones si es necesario
+    }
+
+    public class RegistroVM : VModelBase
+    {
+        public RegistroVM(IAction gesLogin) : base(gesLogin) { }
+
+        public class UserVM
+        {
+            public string Email { get; set; }
+            public int UsuarioId { get; set; }
+            public string Nombre { get; set; } = string.Empty;
+            public string Password { get; set; }
+
+            public static explicit operator UserVM(Usuario user)
+            {
+                return new UserVM
+                    {
+                        UsuarioId = user.UsuarioId,
+                        Email = user.Email,
+                        Nombre = user.Nombre ?? string.Empty,
+                        Password = user.Password
+                    };
+            }
+        }
+    }
+
+    private async Task OnRegisterClick()
+    {
+        try
+        {
+            var result = registroVM.Action("Usuario_Registrar", user.Username, user.Password, user.ConfirmPassword);
+
+
+            Navigation.NavigateTo("/");
+
+        }
+        catch (Exception ex)
+        {
+
+        }
+    }
+
+    private async Task OnGoogleLogin()
+    {
+
+        Navigation.NavigateTo("/entrada");
+
+    }
+
+    /* //-- HACER SOLICITUDES QUE REQUIEREN UNA AUTHENTIFICATION --
+            var accessToken = HttpContext.User?.FindFirst("access_token")?.Value; //Para acceder al token del usuario
+
+            //CUANDO EL USUARIO CIERRA SESION APOSTA
+            [HttpGet("logout")]
+             public async Task<IActionResult> Logout()
+             {
+             await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+             return RedirectToAction("Index", "Home");
+    }
+    */
+}
+}
+

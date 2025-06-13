@@ -1,0 +1,43 @@
+﻿@page "/"
+@using MailAppMAUI.Controladores
+@inject NavigationManager NavManager
+@inject GesLogin _gesLogin
+
+<div id="app">
+    <div class="loading-wrapper">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Cargando...</span>
+        </div>
+        <p>Leyendo Correos...</p>
+    </div>
+</div>
+
+@code {
+
+    private RedirectorVM confEmailVM;
+
+    public class RedirectorVM : VModelBase
+    {
+        public RedirectorVM(IAction gesLogin) : base(gesLogin)
+        {
+
+        }
+    }
+    protected override void OnInitialized()
+    {
+        confEmailVM = new(_gesLogin);
+
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        //NavManager.NavigateTo("/login-normal", forceLoad: true);
+        var res = await confEmailVM.Action("Usuario_ReadEmails", null);
+        bool resAsBool = (bool)res;
+
+
+        NavManager.NavigateTo("/entrada");
+
+    }
+}
+

@@ -1,0 +1,70 @@
+﻿@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Buttons
+@inject EmailApp.UseCases.Services.ContactsActionService ContactsActionService
+@inject NavigationManager Navigation
+@inject EmailApp.UseCases.Services.SearchService SearchService
+
+<div class="navtop-container">
+    <div class="navtop-left">
+        <button class="navbar-toggler" @onclick="Toggle">
+            <i class="@(IsCollapsed ? "bi bi-list" : "bi bi-list-nested")"></i>
+        </button>
+        <NavLink class="navtop-text" href="/">EmailApp</NavLink>
+    </div>
+
+    @if (Navigation.Uri.Contains("/nuevo-correo", StringComparison.OrdinalIgnoreCase))
+    {
+
+    }
+    else
+    {
+        <div class="search-container">
+            @if (Navigation.Uri.Contains("/contacts", StringComparison.OrdinalIgnoreCase))
+            {
+                <SfButton OnClick="OnAddContactClick" CssClass="custom-add-contact-btn" Style="margin-left: 1rem;">
+                    Añadir Contacto
+                </SfButton>
+            }
+
+            <SfTextBox @bind-Value="searchText" Placeholder="Buscar correos..." ShowClearButton="true"
+                       @onkeyup="OnKeyUpHandler" />
+            <SfButton OnClick="ApplySearch" CssClass="search-btn">Buscar</SfButton>
+        </div>
+    }
+
+</div>
+
+@code {
+    [Parameter] public bool IsCollapsed { get; set; }
+    [Parameter] public EventCallback OnToggle { get; set; }
+
+    private string searchText = string.Empty;
+
+    private async Task Toggle()
+    {
+        await OnToggle.InvokeAsync(null);
+    }
+
+    private Task ApplySearch()
+    {
+        Console.WriteLine($"[NavTop] Ejecutando búsqueda con: {searchText}");
+        SearchService.TriggerSearch(searchText);
+        return Task.CompletedTask;
+    }
+
+    private async Task OnKeyUpHandler(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            Console.WriteLine("[NavTop] Enter presionado");
+            await ApplySearch();
+        }
+    }
+
+    private void OnAddContactClick()
+    {
+        // Dispara el evento que notificará a Contacts.razor de agregar contacto.
+        ContactsActionService.TriggerAddContact();
+    }
+
+}

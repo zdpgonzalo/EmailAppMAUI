@@ -1,0 +1,612 @@
+﻿@page "/nuevo-correo"
+@using EmailApp.UseCases.Services
+@using MailAppMAUI.Contexto
+@using MailAppMAUI.General
+@using MailAppMAUI.Core
+@using MailAppMAUI.Controladores
+@using MailAppMAUI.Repositorios
+@using MailAppMAUI.Config
+@using MailAppMAUI.Repositorios
+@using MailAppMAUI.Controladores
+@using MimeKit
+@using Microsoft.AspNetCore.Components.Forms;
+@using MailAppMAUI.UseCases
+@inject GesCorreos _gesCorreos
+@inject RepositoryManager repositoryManager
+@using Syncfusion.Blazor
+@using Syncfusion.Blazor.Grids
+@using Syncfusion.Blazor.Data
+@using Syncfusion.Blazor.Navigations
+@using Syncfusion.Blazor.Inputs
+@using Syncfusion.Blazor.Buttons
+@using Syncfusion.Blazor.RichTextEditor
+@using Syncfusion.Blazor.DropDowns
+@using Syncfusion.Blazor.Notifications
+@using System.Text.RegularExpressions
+@using System.Collections.ObjectModel
+@using MailAppMAUI.UseCases;
+@using System.Net.Http;
+@using System.Net.Http.Headers;
+@using System.IO;
+@using System
+@using System.Text.Json
+@using System.Text;
+@using Logger = Ifs.Comun.Logger;
+@implements IDisposable
+
+<SfToast @ref="toastObj" Timeout="5000">
+    <ToastPosition X="Center" Y="Bottom"></ToastPosition>
+</SfToast>
+
+<!-- Contenedor principal -->
+<div class="newMail-container">
+
+    <!-- Destinatarios -->
+    <div class="form-group">
+        <div class="new-subtext-top">
+            <label for="recipients">Destinatarios</label>
+        </div>
+        <InputText class="form-control"
+                   @bind-Value="nuevoDestinatario"
+                   Placeholder="Escribe un correo y presiona Enter"
+                   @onkeyup="@(async (e) => await OnKeyDownDestinatarioNuevo(e))" />
+
+        <div class="chips-container">
+            @foreach (var dest in email.Destinatarios)
+            {
+                <span class="chip">
+                    @dest
+                    <button type="button" class="btn custom-delete-btn" @onclick="() => QuitarDestinatarioNuevo(dest)">
+                        <i class="bi bi-backspace-fill no-margin"></i>
+                    </button>
+                </span>
+            }
+        </div>
+    </div>
+
+    <!-- Asunto -->
+    <div class="form-group">
+        <div class="new-subtext" style="padding-top: 0px;">
+            <label for="subject">Asunto</label>
+        </div>
+        <InputText id="subject" class="form-control" placeholder="Ingrese el asunto" @bind-Value="email.Asunto" />
+    </div>
+
+    <!-- Editor de Texto Enriquecido -->
+    <div class="form-group">
+        <div class="new-subtext">
+            <label for="body">Cuerpo del Mensaje</label>
+        </div>
+        <SfRichTextEditor @bind-Value="email.CuerpoHTML" Height="500px" placeholder="Escribe tu mensaje aquí..." />
+    </div>
+
+    <!-- Subir Archivos -->
+    <button class="newUpload-btn" @onclick="PickFiles">Subir Archivos</button>
+    <ul class="chipUpload-container">
+        @foreach (var name in uploadedFilePaths)
+        {
+            <li class="chipUpload">
+                <i class="@GetFileIcon(name) no-margin-icon" style="@GetFileColorClass(name) margin-right:6px;"></i>
+                @name
+                <button class="btn custom-delete-btn" @onclick="() => RemoveFile(name)">
+                    <i class="bi bi-backspace-fill"></i>
+                </button>
+            </li>
+        }
+    </ul>
+
+    <!-- Botón Enviar -->
+    <button class="new-btn" @onclick="EnviarCorreo">Enviar Correo</button>
+
+    <!-- Botón Borradores -->
+    <button class="new-btn" @onclick="OnGuardarComoBorrador">Guardar Borrador</button>
+
+    <!-- Editor desplegable de HTML
+        Botón para desplegar el input de HTML
+    <button class="new-btn" @onclick="() => mostrarHtmlEditor = !mostrarHtmlEditor">
+    @(mostrarHtmlEditor ? "HTML" : "HTML")
+    </button>
+
+    @if (mostrarHtmlEditor)
+    {
+            <div class="form-group mt-2">
+                <InputTextArea id="htmlInput" class="form-control"
+                               @bind-Value="htmlComoTexto"
+                               Placeholder="Pega tu HTML aquí..." Rows="5" />
+
+                <button class="new-btn mt-2" @onclick="InsertarHtmlComoCodigo">Insertar</button>
+            </div>
+    } -->
+
+</div>
+
+@code {
+
+    #region COMPONENTES DE LA VISTA
+
+    private EmailModel email = new EmailModel();
+
+    // Variable para capturar el input temporal del destinatario
+    private string nuevoDestinatario = string.Empty;
+
+    private bool mostrarHtmlEditor = false;
+    private string htmlComoTexto = string.Empty;
+
+    // Modelo para recibir los datos
+    public class EmailModel
+    {
+        // Se usa esta lista para gestionar varios destinatarios
+        public List<string> Destinatarios { get; set; } = new List<string>();
+        public string Asunto { get; set; }
+        public string Cuerpo { get; set; }
+        public string CuerpoHTML { get; set; }
+    }
+
+    private BandejaNuevoCorreoVM bandejaNuevoCorreo;
+    static Configuration Conf { get; set; }
+
+    private List<string> uploadedFilePaths = new();
+
+    [Inject] SampleDataService sampleDataService { get; set; }
+    SfToast toastObj { get; set; }
+
+    protected override void OnInitialized()
+    {
+        bandejaNuevoCorreo = new(_gesCorreos, repositoryManager);
+
+        // Para poder usar un directorio
+        if ((Conf = Configuration.Config) == null)
+        {
+            Conf = new Configuration();
+        }
+    }
+
+    public void Dispose()
+    {
+    }
+
+    #endregion
+
+    #region VIEWMODEL
+
+    /// <summary>
+    /// Clase ViewModel de la vista
+    /// </summary>
+    public class BandejaNuevoCorreoVM : VModelBase
+    {
+        public static RepositoryManager repositoryManager;
+
+        public BandejaNuevoCorreoVM(IAction gesCorreos, RepositoryManager repository) : base(gesCorreos)
+        {
+            repositoryManager = repository;
+            UpdateModel(OpResul.Range);
+        }
+
+        /// <summary>
+        /// Clase para representar los correos
+        /// </summary>
+        public class NuevoCorreoVM
+        {
+            public int RespuestaId { get; set; }
+            public string NombreUsuario { get; set; } = string.Empty;
+            public string Remitente { get; set; } = string.Empty;
+            public string Destinatario { get; set; } = string.Empty;
+            public int CorreoId { get; set; }
+            public string Asunto { get; set; } = string.Empty;
+            public string Cuerpo { get; set; } = string.Empty;
+            public string CuerpoHTML { get; set; } = string.Empty;
+            public DateTime Fecha { get; set; }
+            public List<Adjunto> Adjuntos { get; set; }
+
+            /// <summary>
+            /// Conversor explicito de RespuestaCore a NuevoCorreoVM
+            /// </summary>
+            /// <param name="respuesta">respuesta a convertir</param>
+            public static explicit operator NuevoCorreoVM(Respuesta respuesta)
+            {
+                var correoId = respuesta.CorreoId ?? -1;
+                return new NuevoCorreoVM
+                    {
+                        RespuestaId = respuesta.RespuestaId,
+                        NombreUsuario = string.Join(", ",repositoryManager.CorreoRepository
+                                                        .GetById(correoId)?
+                                                        .Destinatarios),
+
+                        CorreoId = respuesta?.CorreoId ?? -1,
+                        Remitente = respuesta.Remitente,
+                        Destinatario = string.Join(", ", respuesta.Destinatarios),
+                        Asunto = respuesta.Asunto ?? string.Empty,
+                        Cuerpo = respuesta.Cuerpo ?? string.Empty,
+                        CuerpoHTML = respuesta.Cuerpo ?? string.Empty,
+                        Fecha = respuesta.FechaProcesado,
+                        Adjuntos = respuesta.Adjuntos,
+                    };
+            }
+        }
+
+
+        /// <summary>
+        /// Añade los correos del repositorio a la lista de correos y a la lista de correos por pagina
+        /// </summary>
+        /// <param name="dataResul"></param>
+
+        public override void UpdateModel(OpResul dataResul)
+        {
+
+        }
+    }
+
+    #endregion
+
+    #region ADJUNTOS
+
+    private async Task PickFiles()
+    {
+        try
+        {
+            var picks = await FilePicker.PickMultipleAsync();
+            if (picks == null) return;
+
+            foreach (var fp in picks)
+            {
+                using var stream = await fp.OpenReadAsync();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                ms.Position = 0;
+
+                var (Success, FileName, Message) =
+                  await sampleDataService.SaveFilesAsync(new[] { ms }, new[] { fp.FileName });
+
+                if (Success)
+                {
+                    uploadedFilePaths.Add(FileName);
+                    await ShowToast($"'{FileName}' subido.");
+                }
+                else
+                {
+                    await ShowToast(Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            await ShowToast($"Error al seleccionar: {ex.Message}");
+            Logger.LogLine("NuevoCorreo", "Error al adjuntar archivos " + ex.Message, "");
+        }
+    }
+
+    private async Task RemoveFile(string name)
+    {
+        if (sampleDataService.RemoveFile(name, out var msg))
+        {
+            uploadedFilePaths.Remove(name);
+            await ShowToast($"'{name}' eliminado.");
+        }
+        else
+        {
+            await ShowToast(msg);
+        }
+    }
+
+    private string GetFileIcon(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "bi bi-filetype-pdf",      // PDF
+            ".doc" => "bi bi-filetype-doc",      // Word
+            ".docx" => "bi bi-filetype-doc",      // Word
+            ".xls" => "bi bi-filetype-xls",      // Excel
+            ".xlsx" => "bi bi-filetype-xls",      // Excel
+            ".ppt" => "bi bi-filetype-ppt",      // PowerPoint
+            ".pptx" => "bi bi-filetype-ppt",      // PowerPoint
+            ".zip" => "bi bi-file-earmark-zip",  // ZIP
+            ".jpg" => "bi bi-filetype-jpg",      // JPG
+            ".jpeg" => "bi bi-filetype-jpg",      // JPG
+            ".png" => "bi bi-filetype-png",      // PNG
+            ".gif" => "bi bi-filetype-gif",      // GIF
+            _ => "bi bi-file-earmark"       // genérico
+        };
+    }
+
+    private string GetFileColorClass(string fileName)
+    {
+        var ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "color:#bf4040;",    // rojo
+            ".doc" => "color:#4083bf;",    // azul
+            ".docx" => "color:#4054bf;",    // azul oscuro
+            ".xls" => "color:#5eae3e;",    // verde
+            ".xlsx" => "color:#3eae48;",    // verde oscuro
+            ".ppt" => "color:#c77e30;",    // naranja
+            ".pptx" => "color:#af712e;",    // naranja oscuro
+            ".zip" => "color:#6e4790;",    // gris
+            ".jpg" => "color:#3a8dac;",    // turquesa
+            ".jpeg" => "color:#3a8dac;",    // turquesa
+            ".png" => "color:#3a8dac;",    // turquesa
+            ".gif" => "color:#3aac61;",    // verde claro
+            _ => "color:#ac9f3a;"     // amarillo
+        };
+    }
+
+    #endregion
+
+    #region GUARDAR BORRADOR
+
+    /// <summary>
+    /// Crea la respuesta y la guarda como borrador. Añade el contacto si no existe.
+    /// </summary>
+    /// <returns></returns>
+    private async Task OnGuardarComoBorrador()
+    {
+        try
+        {
+            // Se crea la respuesta usando la lista de destinatarios
+            Respuesta respuestaDraft = Respuesta.CreateBorrador(Conf.User.Email, email.Destinatarios, email.Asunto, email.CuerpoHTML, email.CuerpoHTML, DateTime.Now);
+
+            var contactos = (List<Contacto>)bandejaNuevoCorreo.GetData("Correo_GetContactos");
+
+            // Se utiliza el primer destinatario para buscar o crear el contacto
+            string nombreDest = "Desconocido";
+            foreach (string contact in email.Destinatarios)
+            {
+                nombreDest = IsNewContact(contact);
+            }
+
+            //respuestaDraft.ChangeNombreDestinatario(nombreDest);
+
+            bandejaNuevoCorreo.Action("Respuesta_GuardarRespuestaBaseDatos", respuestaDraft);
+            bandejaNuevoCorreo.SetData("Respuesta_RespuestaBorrador", true, respuestaDraft.RespuestaId);
+
+            try
+            {
+                bandejaNuevoCorreo.Action("Respuesta_AdjuntarArchivo", respuestaDraft, uploadedFilePaths);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogLine("NuevoCorreo", "Error al adjuntar archivso en GuardarBorrador correo: " + ex, DateTime.Now.ToString());
+            }
+
+            uploadedFilePaths.Clear();
+
+            ShowToast("¡Borrador Guardado!");
+            VaciarPlaceholders();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogLine("NuevoCorreo", "Error al guardar borrador: " + ex.Message, DateTime.Now.ToString());
+        }
+    }
+
+
+    //// <summary>
+    /// Comprueba si el Email está asociado a un contacto. Si no, lo crea.
+    /// </summary>
+    /// <param name="newContact">Email del nuevo contacto</param>
+    /// <returns>El nombre del contacto si existe. Si no, la primera parte de mail (hasta el @). En caso de que algo salga mal, "Desconocido"</returns>
+    private string IsNewContact(string newContact)
+    {
+        string name = "Desconocido";
+        try
+        {
+            var contactos = (List<Contacto>)bandejaNuevoCorreo.GetData("Correo_GetContactos");
+            Contacto miContacto = contactos.FirstOrDefault(c => c.Email == newContact);
+
+            if (miContacto == null)
+            {
+                var usuarios = (List<Usuario>)bandejaNuevoCorreo.GetData("Correo_GetUsuarios");
+                Usuario user = usuarios.Where(u => u.UsuarioId == Conf.User.UserId).FirstOrDefault();
+                miContacto = Contacto.CreateContacto(string.Join(", ", newContact), user.UsuarioId, "");
+                bandejaNuevoCorreo.Action("Contacto_GuardarContacto", miContacto);
+            }
+
+            name = miContacto.Nombre; //Si existe, devuvelve el nombre, si no existe, lo crea y devuelve el nombre
+        }
+        catch (Exception ex)
+        {
+            Logger.LogLine("NuevoCorreo", "Error al comprobar si es nuevo contacto: " + ex, DateTime.Now.ToString());
+        }
+
+
+        return name;
+    }
+
+
+    #endregion
+
+    #region ENVIAR CORREOS
+
+    /// <summary>
+    /// Crea la respuesta y la envía. Añade el contacto si no existe.
+    /// Se utiliza el primer destinatario de la lista para gestionar el contacto.
+    /// </summary>
+    /// <returns></returns>
+    private async Task EnviarCorreo()
+    {
+        if (email.Destinatarios == null || !email.Destinatarios.Any())
+        {
+            await ShowToast("Por favor, añade al menos un destinatario.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(email.Asunto))
+        {
+            await ShowToast("El asunto no puede estar vacío.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(email.CuerpoHTML))
+        {
+            await ShowToast("El cuerpo del mensaje no puede estar vacío.");
+            return;
+        }
+
+        try
+        {
+            Respuesta respuestaEnviar;
+            //Se crea la respuesta dependiendo de si hay uno o hay varios
+
+            respuestaEnviar = Respuesta.CreateRespuesta(null, Conf.User.Email, email.Destinatarios, email.Asunto, email.CuerpoHTML, email.CuerpoHTML, DateTime.Now);
+
+            string nombreDest = "";
+
+
+            foreach (string contact in email.Destinatarios)
+            {
+                nombreDest = IsNewContact(contact);
+            }
+
+            bandejaNuevoCorreo.Action("Respuesta_GuardarRespuestaBaseDatos", respuestaEnviar);
+            bandejaNuevoCorreo.Action("Respuesta_AdjuntarArchivo", respuestaEnviar, uploadedFilePaths);
+            bandejaNuevoCorreo.Action("Respuesta_EnviarRespuesta", respuestaEnviar);
+
+            VaciarPlaceholders();
+            uploadedFilePaths.Clear();
+            await ShowToast("¡Correo Enviado!");
+
+        }
+        catch (Exception ex)
+        {
+            Logger.LogLine("NuevoCorreo", "Error al enviar correo: " + ex, DateTime.Now.ToString());
+        }
+    }
+
+    #endregion
+
+    #region HTML
+
+    // private void InsertarHtmlComoCodigo()
+    // {
+    //     if (!string.IsNullOrWhiteSpace(htmlComoTexto))
+    //     {
+
+    //         // Insertar el HTML tal cual, SIN escapar
+    //         email.CuerpoHTML += htmlComoTexto;
+
+    //         // Limpiar
+    //         htmlComoTexto = string.Empty;
+    //         mostrarHtmlEditor = false;
+
+    //         StateHasChanged();
+    //     }
+    // }
+
+    /// <summary>
+    /// Convertir imagenes a base64 para que se vean al añadirlas como html
+    /// </summary>
+    /// <param name="imagePath"></param>
+    /// <returns></returns>
+    private string ConvertImageToBase64(string imagePath)
+    {
+        if (!File.Exists(imagePath))
+            return null;
+
+        var extension = Path.GetExtension(imagePath).ToLowerInvariant();
+        string mimeType = extension switch
+        {
+            ".png" => "image/png",
+            ".jpg" => "image/jpeg",
+            ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            _ => "application/octet-stream"
+        };
+
+        byte[] imageBytes = File.ReadAllBytes(imagePath);
+        string base64String = Convert.ToBase64String(imageBytes);
+        return $"data:{mimeType};base64,{base64String}";
+    }
+
+    /// <summary>
+    /// Añadir html y que se vea correctamtene en el correo --> Lo que falla es que si la ruta no es absoluta o https, no lo detecta (hacer que se adjunte un archivo .html para poder coger las imagenes referenciadas de esa ruta)
+    /// </summary>
+    private void InsertarHtmlComoCodigo()
+    {
+        if (string.IsNullOrWhiteSpace(htmlComoTexto))
+            return;
+
+        string pattern = "<img[^>]*src=[\"']([^\"']+)[\"'][^>]*>";
+        var matches = Regex.Matches(htmlComoTexto, pattern, RegexOptions.IgnoreCase);
+
+        foreach (Match match in matches)
+        {
+            string fullTag = match.Value;
+            string imgSrc = match.Groups[1].Value;
+
+            if (Path.IsPathRooted(imgSrc) && File.Exists(imgSrc)) // solo rutas locales absolutas
+            {
+                string base64Data = ConvertImageToBase64(imgSrc);
+                if (!string.IsNullOrEmpty(base64Data))
+                {
+                    string newTag = fullTag.Replace(imgSrc, base64Data);
+                    htmlComoTexto = htmlComoTexto.Replace(fullTag, newTag);
+                }
+            }
+        }
+
+        email.CuerpoHTML += htmlComoTexto;
+        htmlComoTexto = string.Empty;
+        mostrarHtmlEditor = false;
+
+        StateHasChanged();
+    }
+
+    #endregion
+
+    #region MEJORAS
+
+    /// <summary>
+    /// Limpia los campos para comenzar un nuevo correo.
+    /// </summary>
+    private void VaciarPlaceholders()
+    {
+        email.Destinatarios = new List<string>();
+        email.Asunto = string.Empty;
+        email.CuerpoHTML = string.Empty;
+        email.Cuerpo = string.Empty;
+        nuevoDestinatario = string.Empty;
+    }
+
+    private async Task ShowToast(string text)
+    {
+        await toastObj.ShowAsync(new ToastModel
+            {
+                Content = text,
+                CssClass = "custom-toast",
+                Timeout = 3000
+            });
+    }
+
+    /// <summary>
+    /// Maneja el evento de tecla en el textbox de destinatarios.
+    /// - Si se presiona "Enter" y el input no está vacío, añade el email a la lista.
+    /// </summary>
+    /// <param name="e">Evento de teclado</param>
+    private async Task OnKeyDownDestinatarioNuevo(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(nuevoDestinatario))
+        {
+            email.Destinatarios.Add(nuevoDestinatario.Trim());
+            nuevoDestinatario = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Permite quitar un destinatario al hacer clic en el botón del chip.
+    /// </summary>
+    /// <param name="dest">El email a remover</param>
+    private void QuitarDestinatarioNuevo(string dest)
+    {
+        if (email.Destinatarios.Contains(dest))
+        {
+            email.Destinatarios.Remove(dest);
+            StateHasChanged();
+        }
+    }
+
+    #endregion
+
+}
